@@ -1,0 +1,20 @@
+{
+  "name": "mt-optics-workflow",
+  "version": "1.4.0",
+  "private": true,
+  "description": "MT옵틱스 주문·수금·생산·재고 통합 웹앱",
+  "workspaces": [
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npm --workspace backend run dev",
+    "start": "npm --workspace backend start",
+    "build": "echo \"Frontend is static. Nothing to build.\"",
+    "seed:sample": "npm --workspace backend run seed:sample",
+    "check": "node --check backend/src/app.js && node --check backend/src/db.js && node --check backend/src/server.js && node --check backend/src/sampleData.js && node --check backend/src/excelImport.js && node --check tools/import-excel.js && node --check netlify/functions/api.js && node --check frontend/app.js",
+    "import:excel": "node tools/import-excel.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
