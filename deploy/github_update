@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# MT Optics - GitHub to AWS Lightsail update script
-# Default usage:
-#   bash /var/www/mt-optics/deploy/aws-update.sh
-#
-# Optional environment overrides:
-#   PROJECT_DIR=/var/www/mt-optics BRANCH=main PM2_APP=mt-optics bash deploy/aws-update.sh
+# MT Optics GitHub -> AWS Lightsail automatic update
+# Run with:
+#   cd /var/www/mt-optics
+#   bash deploy/github_update
+
+# Copy this script to /tmp before Git updates overwrite the project copy.
+if [[ "${MT_UPDATE_TEMP_RUN:-0}" != "1" ]]; then
+  TEMP_SCRIPT="/tmp/mt-optics-github_update_$$"
+  cp "$0" "$TEMP_SCRIPT"
+  chmod +x "$TEMP_SCRIPT"
+  export MT_UPDATE_TEMP_RUN=1
+  exec bash "$TEMP_SCRIPT" "$@"
+fi
 
 PROJECT_DIR="${PROJECT_DIR:-/var/www/mt-optics}"
-BRANCH="${BRANCH:-main}"
 REMOTE="${REMOTE:-origin}"
+BRANCH="${BRANCH:-main}"
 PM2_APP="${PM2_APP:-mt-optics}"
 APP_ENTRY="${APP_ENTRY:-backend/src/app.js}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1/}"
@@ -18,45 +25,46 @@ HEALTH_URL="${HEALTH_URL:-http://127.0.0.1/}"
 TIMESTAMP="$(date '+%Y%m%d_%H%M%S')"
 LOG_DIR="${PROJECT_DIR}/deploy/logs"
 BACKUP_DIR="${PROJECT_DIR}/deploy/backups"
-LOG_FILE="${LOG_DIR}/aws-update_${TIMESTAMP}.log"
+LOG_FILE="${LOG_DIR}/github_update_${TIMESTAMP}.log"
 CURRENT_STEP="initializing"
 
 mkdir -p "$LOG_DIR" "$BACKUP_DIR"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-print_line() {
+line() {
   printf '%s\n' "============================================================"
 }
 
-fail_message() {
+show_failure() {
   local exit_code="$1"
-  print_line
+  line
   echo "UPDATE FAILED"
-  echo "Step      : $CURRENT_STEP"
-  echo "Exit code : $exit_code"
-  echo "Log file  : $LOG_FILE"
+  echo "Failed step : $CURRENT_STEP"
+  echo "Exit code   : $exit_code"
+  echo "Log file    : $LOG_FILE"
   echo
-  echo "Fix the reported problem, then run the same command again:"
-  echo "bash ${PROJECT_DIR}/deploy/aws-update.sh"
-  print_line
+  echo "Fix the displayed problem and run again:"
+  echo "cd $PROJECT_DIR"
+  echo "bash deploy/github_update"
+  line
 }
 
-trap 'code=$?; fail_message "$code"; exit "$code"' ERR
+trap 'code=$?; show_failure "$code"; exit "$code"' ERR
 
-run_step() {
+step() {
   CURRENT_STEP="$1"
   shift
-  print_line
+  line
   echo "STEP: $CURRENT_STEP"
   echo "TIME: $(date '+%Y-%m-%d %H:%M:%S')"
-  print_line
+  line
   "$@"
 }
 
-require_command() {
-  local command_name="$1"
-  if ! command -v "$command_name" >/dev/null 2>&1; then
-    echo "Required command not found: $command_name"
+need_command() {
+  local name="$1"
+  if ! command -v "$name" >/dev/null 2>&1; then
+    echo "Required command not found: $name"
     return 1
   fi
 }
@@ -69,45 +77,50 @@ check_project() {
 
   cd "$PROJECT_DIR"
 
-  if [[ ! -d ".git" ]]; then
-    echo "Git repository not found in: $PROJECT_DIR"
+  if [[ ! -d .git ]]; then
+    echo "Git repository not found: $PROJECT_DIR"
     return 1
   fi
 
-  if [[ ! -f "package.json" ]]; then
-    echo "package.json not found in: $PROJECT_DIR"
+  if [[ ! -f package.json ]]; then
+    echo "package.json not found: $PROJECT_DIR/package.json"
     return 1
   fi
 
   if [[ ! -f "$APP_ENTRY" ]]; then
-    echo "Application entry file not found: $PROJECT_DIR/$APP_ENTRY"
+    echo "Application file not found: $PROJECT_DIR/$APP_ENTRY"
     return 1
   fi
 }
 
-backup_local_changes() {
+backup_changes() {
   cd "$PROJECT_DIR"
 
   if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
     local patch_file="${BACKUP_DIR}/tracked_changes_${TIMESTAMP}.patch"
-    echo "Tracked local changes were found."
-    echo "Saving backup patch to: $patch_file"
     git diff HEAD > "$patch_file"
+    echo "Tracked server changes were backed up:"
+    echo "$patch_file"
   else
-    echo "No tracked local changes found."
+    echo "No tracked server changes found."
   fi
 }
 
-fetch_latest_source() {
+download_latest() {
   cd "$PROJECT_DIR"
   git fetch "$REMOTE" "$BRANCH"
   git reset --hard "${REMOTE}/${BRANCH}"
+
+  # Windows GitHub clients may not preserve the Linux executable bit.
+  chmod +x deploy/github_update 2>/dev/null || true
+  chmod +x deploy/upload_diagnose 2>/dev/null || true
+
   echo
-  echo "Current commit:"
+  echo "Downloaded commit:"
   git log --oneline -1
 }
 
-install_dependencies() {
+install_packages() {
   cd "$PROJECT_DIR"
   npm install
 }
@@ -115,12 +128,20 @@ install_dependencies() {
 check_javascript() {
   cd "$PROJECT_DIR"
   node --check "$APP_ENTRY"
+
+  if [[ -f frontend/app.js ]]; then
+    node --check frontend/app.js
+  fi
+
+  if [[ -f frontend/excel-upload-ui-fix.js ]]; then
+    node --check frontend/excel-upload-ui-fix.js
+  fi
 }
 
 check_pm2_app() {
   if ! pm2 describe "$PM2_APP" >/dev/null 2>&1; then
     echo "PM2 application not found: $PM2_APP"
-    echo "Check the name with: pm2 list"
+    echo "Check the application name with: pm2 list"
     return 1
   fi
 }
@@ -129,21 +150,26 @@ restart_pm2() {
   pm2 restart "$PM2_APP" --update-env
 }
 
-verify_pm2_online() {
-  PM2_APP="$PM2_APP" pm2 jlist | node -e '
-    let input = "";
-    process.stdin.on("data", chunk => input += chunk);
+verify_pm2() {
+  pm2 jlist | APP_NAME="$PM2_APP" node -e '
+    let data = "";
+    process.stdin.on("data", chunk => data += chunk);
     process.stdin.on("end", () => {
-      const appName = process.env.PM2_APP;
-      const list = JSON.parse(input);
-      const app = list.find(item => item.name === appName);
+      const appName = process.env.APP_NAME;
+      const apps = JSON.parse(data);
+      const app = apps.find(item => item.name === appName);
+
       if (!app) {
         console.error(`PM2 app not found after restart: ${appName}`);
         process.exit(1);
       }
+
       const status = app.pm2_env && app.pm2_env.status;
       console.log(`PM2 status: ${appName} = ${status}`);
-      if (status !== "online") process.exit(1);
+
+      if (status !== "online") {
+        process.exit(1);
+      }
     });
   '
 }
@@ -160,40 +186,40 @@ restart_nginx() {
 
 health_check() {
   if ! command -v curl >/dev/null 2>&1; then
-    echo "curl is not installed. HTTP health check skipped."
+    echo "curl is not installed. Website response check skipped."
     return 0
   fi
 
   curl --fail --silent --show-error --max-time 15 "$HEALTH_URL" >/dev/null
-  echo "HTTP health check passed: $HEALTH_URL"
+  echo "Website response check passed: $HEALTH_URL"
 }
 
-print_line
-echo "MT Optics AWS Lightsail Update"
+line
+echo "MT Optics GitHub -> AWS Lightsail Update v1.1"
 echo "Project : $PROJECT_DIR"
 echo "Branch  : $BRANCH"
 echo "PM2 app : $PM2_APP"
 echo "Log     : $LOG_FILE"
-print_line
+line
 
-run_step "Checking required commands" require_command git
-run_step "Checking Node.js" require_command node
-run_step "Checking npm" require_command npm
-run_step "Checking PM2" require_command pm2
-run_step "Checking Nginx" require_command nginx
-run_step "Checking project files" check_project
-run_step "Backing up tracked local changes" backup_local_changes
-run_step "Downloading latest source from GitHub" fetch_latest_source
-run_step "Installing Node.js packages" install_dependencies
-run_step "Checking JavaScript syntax" check_javascript
-run_step "Checking PM2 application" check_pm2_app
-run_step "Restarting PM2 application" restart_pm2
-run_step "Verifying PM2 status" verify_pm2_online
-run_step "Checking Nginx configuration" check_nginx
-run_step "Restarting Nginx" restart_nginx
-run_step "Checking local website response" health_check
+step "Checking Git" need_command git
+step "Checking Node.js" need_command node
+step "Checking npm" need_command npm
+step "Checking PM2" need_command pm2
+step "Checking Nginx" need_command nginx
+step "Checking project" check_project
+step "Backing up tracked server changes" backup_changes
+step "Downloading latest GitHub source" download_latest
+step "Installing Node.js packages" install_packages
+step "Checking JavaScript syntax" check_javascript
+step "Checking PM2 application" check_pm2_app
+step "Restarting PM2 application" restart_pm2
+step "Verifying PM2 status" verify_pm2
+step "Checking Nginx configuration" check_nginx
+step "Restarting Nginx" restart_nginx
+step "Checking website response" health_check
 
-print_line
+line
 echo "UPDATE COMPLETED SUCCESSFULLY"
 echo "Commit   : $(git -C "$PROJECT_DIR" log --oneline -1)"
 echo "PM2 app  : $PM2_APP = online"
@@ -202,4 +228,6 @@ echo "Log file : $LOG_FILE"
 echo
 echo "Open the website and press Ctrl+F5:"
 echo "http://43.203.11.28"
-print_line
+line
+
+rm -f "$0" 2>/dev/null || true
