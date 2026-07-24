@@ -199,3 +199,56 @@ tr:hover td { background: #fcfcfd; }
 .topbar-actions { display: flex; gap: 10px; align-items: center; }
 .toast-message.error { background: #b42318 !important; }
 .toast-message.success { background: #111827 !important; }
+
+.input-action { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.input-action button { white-space: nowrap; }
+.address-block { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #f8fafc; }
+.upload-guide { padding: 14px; margin-bottom: 14px; border: 1px solid #c7d7fe; border-radius: 14px; background: #eef4ff; }
+.upload-guide ol { margin: 8px 0 8px 22px; padding: 0; }
+.action-cell { white-space: nowrap; }
+.action-cell button { margin: 2px; }
+.mobile-quickbar { display: none; }
+
+@media (max-width: 720px) {
+  body { padding-bottom: 68px; }
+  button, input, select, textarea { min-height: 44px; }
+  .app-shell { display: block; }
+  .sidebar { height: auto; padding: 8px; position: static; }
+  .brand { margin-bottom: 6px; padding: 6px; }
+  .brand-subtitle { display: none; }
+  .nav { display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
+  .nav button { width: auto; min-width: max-content; padding: 9px 11px; }
+  .sidebar-footer { display: none; }
+  .topbar { height: auto; min-height: 56px; padding: 10px 14px; }
+  .topbar .muted { font-size: 11px; }
+  .topbar-actions > span, .topbar-actions .danger { display: none; }
+  .content { padding: 12px; }
+  .panel { padding: 13px; border-radius: 14px; }
+  .page-title { font-size: 21px; }
+  .page-subtitle { font-size: 13px; margin-bottom: 12px; }
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+  .kpi-card { padding: 12px; }
+  .kpi-value { font-size: 21px; }
+  .modal-backdrop { padding: 8px; align-items: end; }
+  .modal { max-height: 94vh; border-radius: 18px 18px 0 0; }
+  .modal-body { padding: 14px; }
+  .modal-header { padding: 13px 14px; }
+  .item-row { grid-template-columns: 1fr; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
+  .input-action { grid-template-columns: 1fr; }
+  table { min-width: 760px; }
+  .mobile-quickbar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 15;
+    background: rgba(255,255,255,.96);
+    border-top: 1px solid var(--line);
+    padding: 7px 6px calc(7px + env(safe-area-inset-bottom));
+    box-shadow: 0 -8px 20px rgba(16,24,40,.08);
+  }
+  .mobile-quickbar button { background: transparent; color: #475467; padding: 8px 4px; font-size: 12px; min-height: 42px; }
+  .mobile-quickbar button.active { color: var(--brand); background: #eef2ff; }
+}

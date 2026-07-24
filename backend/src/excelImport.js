@@ -9,6 +9,13 @@ function clean(value) {
   return s;
 }
 
+function valueOf(row, aliases) {
+  for (const alias of aliases) {
+    if (Object.prototype.hasOwnProperty.call(row || {}, alias) && clean(row[alias]) !== null) return row[alias];
+  }
+  return null;
+}
+
 function toNumber(value) {
   if (value === undefined || value === null || value === '') return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -69,7 +76,7 @@ function normalizeDeliveryType(value, defaultValue = '택배') {
 
 function detectDeliveryTypeFromRow(row, fileName = '') {
   const values = Object.values(row || {}).map((v) => clean(v)).filter(Boolean).join(' ');
-  return normalizeDeliveryType(`${fileName} ${values}`, '택배');
+  return normalizeDeliveryType(`${fileName} ${values}`, '기타');
 }
 
 function hashText(input) {
@@ -82,19 +89,24 @@ function safeSkuFromName(name, spec = '') {
 }
 
 function detectFileType(fileName, headerMap) {
-  const name = path.basename(fileName || '');
+  const name = path.basename(fileName || '').replace(/\s+/g, '');
   const headers = Object.keys(headerMap).join('|');
+  if (/거래처정보/.test(name)) return 'customer_info';
+  if (/판매처원장상세|거래처원장/.test(name) || (headers.includes('거래항목') && headers.includes('품목명/규격'))) return 'customer_ledger';
+  if (/일별영업현황/.test(name)) return 'daily_sales_status';
   if (/수금|미수금/.test(name) || (headers.includes('거래처코드') && headers.includes('미수금액'))) return 'receivable_statement';
-  if (/거래처원장/.test(name) || (headers.includes('거래항목') && headers.includes('품목명/규격'))) return 'customer_ledger';
   if (/판매명세서/.test(name) || (headers.includes('상세규격') && headers.includes('담당자'))) return 'sales_detail';
   if (/거래처별/.test(name) || (headers.includes('상계잔액') && headers.includes('미지급금'))) return 'customer_sales_summary';
+  if (headers.includes('거래처명') && (headers.includes('주소') || headers.includes('사업자번호'))) return 'customer_info';
+  if (headers.includes('거래일자') && headers.includes('거래처명') && (headers.includes('매출액') || headers.includes('수금액'))) return 'daily_sales_status';
   return 'unknown_excel';
 }
 
 function findHeaderRow(rows) {
+  const markers = ['거래처명', '판매처명', '상호', '업체명', '거래처', '거래일자', '판매일자', '일자', '거래처코드', '판매처코드'];
   for (let r = 0; r < rows.length; r += 1) {
     const values = (rows[r] || []).map((v) => clean(v)).filter(Boolean);
-    if (values.length >= 3 && (values.includes('거래처명') || values.includes('거래일자') || values.includes('거래처코드'))) return r;
+    if (values.length >= 2 && values.some((value) => markers.includes(value))) return r;
   }
   return -1;
 }
@@ -161,6 +173,13 @@ async function upsertCustomer(conn, payload, userId) {
     name,
     business_no: clean(payload.business_no) || undefined,
     phone: clean(payload.phone) || undefined,
+    mobile: clean(payload.mobile) || undefined,
+    address: clean(payload.address) || clean(payload.road_address) || clean(payload.jibun_address) || undefined,
+    postal_code: clean(payload.postal_code) || undefined,
+    road_address: clean(payload.road_address) || undefined,
+    jibun_address: clean(payload.jibun_address) || undefined,
+    detail_address: clean(payload.detail_address) || undefined,
+    address_type: clean(payload.address_type) || undefined,
     region: clean(payload.region) || undefined,
     opening_receivable: payload.opening_receivable !== undefined ? toNumber(payload.opening_receivable) : undefined,
     memo: clean(payload.memo) || (originalName && originalName !== name ? `원거래처명: ${originalName}` : undefined),
@@ -168,8 +187,8 @@ async function upsertCustomer(conn, payload, userId) {
   };
 
   if (rows.length === 0) {
-    const fields = ['code', 'name', 'business_no', 'phone', 'region', 'opening_receivable', 'memo', 'created_by', 'updated_by'];
-    const values = [code, name, clean(payload.business_no), clean(payload.phone), clean(payload.region), toNumber(payload.opening_receivable), updateData.memo || null, userId || null, userId || null];
+    const fields = ['code', 'name', 'business_no', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'opening_receivable', 'memo', 'created_by', 'updated_by'];
+    const values = [code, name, clean(payload.business_no), clean(payload.phone), clean(payload.mobile), clean(payload.address) || clean(payload.road_address) || clean(payload.jibun_address), clean(payload.postal_code), clean(payload.road_address), clean(payload.jibun_address), clean(payload.detail_address), clean(payload.address_type), clean(payload.region), toNumber(payload.opening_receivable), updateData.memo || null, userId || null, userId || null];
     const [result] = await conn.execute(`INSERT INTO customers(${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`, values);
     const after = await getRecord(conn, 'customers', result.insertId);
     await writeAudit(conn, 'customers', result.insertId, 'IMPORT', null, after, userId);
@@ -219,7 +238,12 @@ async function upsertCustomerSite(conn, payload, userId) {
     business_no: clean(payload.business_no),
     phone: clean(payload.phone),
     mobile: clean(payload.mobile),
-    address: clean(payload.address),
+    address: clean(payload.address) || clean(payload.road_address) || clean(payload.jibun_address),
+    postal_code: clean(payload.postal_code),
+    road_address: clean(payload.road_address),
+    jibun_address: clean(payload.jibun_address),
+    detail_address: clean(payload.detail_address),
+    address_type: clean(payload.address_type),
     region: clean(payload.region) || (siteName === '기본' ? null : siteName),
     default_delivery_type: deliveryType,
     default_delivery_group: clean(payload.delivery_group) || '기타',
@@ -393,6 +417,86 @@ async function importLedgerRow(conn, batchId, fileName, item, userId, counters) 
   counters.skipped += 1;
 }
 
+async function importCustomerInfoRow(conn, fileName, item, userId, counters) {
+  const row = item.row;
+  const name = valueOf(row, ['거래처명', '판매처명', '상호', '업체명', '거래처']);
+  if (!stripLeadingCustomerPrefix(name)) { counters.skipped += 1; return; }
+  await upsertCustomerSite(conn, {
+    code: valueOf(row, ['거래처코드', '판매처코드', '코드']),
+    name,
+    site_name: valueOf(row, ['납품처', '지점명', '지역명', '영업점']),
+    site_code: valueOf(row, ['납품처코드', '지점코드']),
+    business_no: valueOf(row, ['사업자번호', '사업자등록번호']),
+    owner_name: valueOf(row, ['대표자', '대표자명']),
+    phone: valueOf(row, ['전화번호', '전화', 'TEL']),
+    mobile: valueOf(row, ['휴대폰', '핸드폰', '휴대전화']),
+    postal_code: valueOf(row, ['우편번호', '우편 번호']),
+    road_address: valueOf(row, ['도로명주소', '신주소']),
+    jibun_address: valueOf(row, ['지번주소', '구주소']),
+    detail_address: valueOf(row, ['상세주소', '주소상세']),
+    address: valueOf(row, ['주소', '소재지']),
+    region: valueOf(row, ['지역', '시도', '지역명']),
+    delivery_type: valueOf(row, ['발송구분', '배송구분', '납품방법']) || '기타',
+    delivery_group: valueOf(row, ['박싱구분', '포장구분']),
+    opening_receivable: valueOf(row, ['이월미수금액', '이월미수', '기초미수']),
+    memo: `거래처 정보 엑셀: ${fileName} ${item.sheetName} ${item.rowNo}행`
+  }, userId);
+  counters.updated += 1;
+}
+
+async function importDailySalesStatusRow(conn, batchId, fileName, item, userId, counters) {
+  const row = item.row;
+  const date = toDateText(valueOf(row, ['거래일자', '일자', '판매일자', '날짜']));
+  const customerName = valueOf(row, ['거래처명', '판매처명', '상호', '업체명', '거래처']);
+  if (!date || !stripLeadingCustomerPrefix(customerName)) { counters.skipped += 1; return; }
+
+  const productName = valueOf(row, ['품목명/규격', '품목명', '제품명', '상품명']);
+  const salesAmount = toNumber(valueOf(row, ['합계', '판매액', '매출액', '매출/매입액', '매출금액', '공급대가']));
+  const paymentAmount = toNumber(valueOf(row, ['수금액', '수금/지급액', '입금액', '결제액']));
+
+  if (productName || salesAmount > 0) {
+    await importSalesRow(conn, batchId, fileName, {
+      ...item,
+      row: {
+        '거래일자': date,
+        '거래처명': customerName,
+        '품목명/규격': productName || '일별영업현황 합계',
+        '상세규격': valueOf(row, ['상세규격', '규격', '모델']),
+        '수량': valueOf(row, ['수량', '판매수량']) || 1,
+        '단가': valueOf(row, ['단가', '판매단가']) || salesAmount,
+        '공급가액': valueOf(row, ['공급가액', '공급액']) || salesAmount,
+        '부가세': valueOf(row, ['부가세', '세액']) || 0,
+        '합계': salesAmount || toNumber(valueOf(row, ['공급가액', '공급액']))
+      }
+    }, userId, counters);
+  }
+
+  if (paymentAmount > 0) {
+    const rowHash = hashText(`${fileName}|${item.sheetName}|${item.rowNo}|daily-payment|${date}|${customerName}|${paymentAmount}`);
+    if (!(await rowAlreadyImported(conn, rowHash))) {
+      const deliveryType = detectDeliveryTypeFromRow(row, fileName);
+      const { customer, site } = await upsertCustomerSite(conn, {
+        name: customerName,
+        site_name: valueOf(row, ['납품처', '지점명', '지역명']),
+        delivery_type: deliveryType,
+        memo: `일별영업현황: ${fileName}`
+      }, userId);
+      const paymentNo = `PAY-DAY-${date.replace(/-/g, '')}-${rowHash.slice(0, 8).toUpperCase()}`;
+      const methodText = clean(valueOf(row, ['수금방법', '결제방법', '입금구분'])) || 'other';
+      const [paymentResult] = await conn.execute(
+        `INSERT INTO payments(payment_no, customer_id, customer_site_id, delivery_type, payment_date, method, amount, memo, created_by, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [paymentNo, customer.id, site?.id || null, deliveryType, date, methodText, paymentAmount, `일별영업현황 수금 ${fileName} ${item.rowNo}행`, userId || null, userId || null]
+      );
+      await insertReceivable(conn, customer.id, date, 'payment', -paymentAmount, { payment_id: paymentResult.insertId, customer_site_id: site?.id || null, delivery_type: deliveryType }, `일별영업현황 수금 ${paymentNo}`, userId);
+      await markImported(conn, rowHash, batchId, 'payments', paymentResult.insertId);
+      counters.inserted += 1;
+    }
+  }
+
+  if (!productName && salesAmount <= 0 && paymentAmount <= 0) counters.skipped += 1;
+}
+
 async function importReceivableStatementRow(conn, fileName, item, userId, counters) {
   const row = item.row;
   const name = row['거래처명'];
@@ -420,8 +524,10 @@ async function importSummaryRow(conn, fileName, item, userId, counters) {
 }
 
 async function processItem(conn, batchId, fileName, item, userId, counters) {
+  if (item.type === 'customer_info') return importCustomerInfoRow(conn, fileName, item, userId, counters);
   if (item.type === 'sales_detail') return importSalesRow(conn, batchId, fileName, item, userId, counters);
   if (item.type === 'customer_ledger') return importLedgerRow(conn, batchId, fileName, item, userId, counters);
+  if (item.type === 'daily_sales_status') return importDailySalesStatusRow(conn, batchId, fileName, item, userId, counters);
   if (item.type === 'receivable_statement') return importReceivableStatementRow(conn, fileName, item, userId, counters);
   if (item.type === 'customer_sales_summary') return importSummaryRow(conn, fileName, item, userId, counters);
   counters.skipped += 1;

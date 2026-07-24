@@ -4,3 +4,8 @@ node_modules/
 npm-debug.log*
 dist/
 .netlify/
+*.sql.gz
+backups/
+uploads/
+import/excel/*.xls
+import/excel/*.xlsx

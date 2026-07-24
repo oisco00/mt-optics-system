@@ -109,6 +109,11 @@ CREATE TABLE IF NOT EXISTS customers (
   phone VARCHAR(50) NULL,
   mobile VARCHAR(50) NULL,
   address VARCHAR(255) NULL,
+  postal_code VARCHAR(20) NULL,
+  road_address VARCHAR(255) NULL,
+  jibun_address VARCHAR(255) NULL,
+  detail_address VARCHAR(255) NULL,
+  address_type VARCHAR(20) NULL,
   region VARCHAR(80) NULL,
   sales_rep_id BIGINT UNSIGNED NULL,
   payment_terms VARCHAR(80) NULL,
@@ -141,6 +146,11 @@ CREATE TABLE IF NOT EXISTS customer_sites (
   phone VARCHAR(50) NULL,
   mobile VARCHAR(50) NULL,
   address VARCHAR(255) NULL,
+  postal_code VARCHAR(20) NULL,
+  road_address VARCHAR(255) NULL,
+  jibun_address VARCHAR(255) NULL,
+  detail_address VARCHAR(255) NULL,
+  address_type VARCHAR(20) NULL,
   region VARCHAR(80) NULL,
   default_delivery_type VARCHAR(40) NOT NULL DEFAULT '택배',
   default_delivery_group VARCHAR(40) NOT NULL DEFAULT '기타',
@@ -245,6 +255,9 @@ CREATE TABLE IF NOT EXISTS sales_orders (
   ordered_by BIGINT UNSIGNED NULL,
   created_by BIGINT UNSIGNED NULL,
   updated_by BIGINT UNSIGNED NULL,
+  deleted_at DATETIME NULL,
+  deleted_by BIGINT UNSIGNED NULL,
+  delete_reason VARCHAR(500) NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_sales_orders_customer (customer_id),
@@ -321,6 +334,11 @@ CREATE TABLE IF NOT EXISTS payments (
   collector_user_id BIGINT UNSIGNED NULL,
   memo TEXT NULL,
   created_by BIGINT UNSIGNED NULL,
+  updated_by BIGINT UNSIGNED NULL,
+  status VARCHAR(30) NOT NULL DEFAULT 'active',
+  deleted_at DATETIME NULL,
+  deleted_by BIGINT UNSIGNED NULL,
+  delete_reason VARCHAR(500) NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_payments_customer (customer_id),
@@ -470,6 +488,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ip_address VARCHAR(80) NULL,
   user_agent VARCHAR(255) NULL,
+  change_reason VARCHAR(500) NULL,
   INDEX idx_audit_table_record (table_name, record_id),
   INDEX idx_audit_changed_at (changed_at),
   CONSTRAINT fk_audit_changed_by FOREIGN KEY (changed_by) REFERENCES users(id) ON DELETE SET NULL
@@ -496,3 +515,4 @@ INSERT IGNORE INTO schema_migrations(version) VALUES ('2026-07-08-initial-mt-opt
 
 INSERT IGNORE INTO schema_migrations(version) VALUES ('2026-07-08-v1.3-master-import');
 INSERT IGNORE INTO schema_migrations(version) VALUES ('2026-07-22-v1.4-aws-delivery-type-sites');
+INSERT IGNORE INTO schema_migrations(version) VALUES ('2026-07-24-v1.5-security-mobile-address-audit');

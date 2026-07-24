@@ -95,6 +95,47 @@ function customerSiteOptions(sites, selected = '', customerId = '') {
   return `<option value="">기본/미지정</option>` + filtered.map((s) => `<option value="${escapeHtml(s.id)}" ${String(selected || '') === String(s.id) ? 'selected' : ''}>${escapeHtml([s.customer_name, s.site_name, s.default_delivery_type].filter(Boolean).join(' · '))}</option>`).join('');
 }
 
+function addressFields(row = {}) {
+  return `
+    <div class="address-block">
+      <div class="form-grid two">
+        <div><label>우편번호</label><div class="input-action"><input name="postal_code" value="${escapeHtml(row.postal_code || '')}" readonly /><button type="button" class="secondary address-search-btn">주소검색</button></div></div>
+        <div><label>선택주소</label><select name="address_type"><option value="R" ${row.address_type === 'R' ? 'selected' : ''}>도로명주소</option><option value="J" ${row.address_type === 'J' ? 'selected' : ''}>지번주소</option></select></div>
+      </div>
+      <div class="form-grid two" style="margin-top:12px">
+        <div><label>도로명주소(신주소)</label><input name="road_address" value="${escapeHtml(row.road_address || '')}" readonly /></div>
+        <div><label>지번주소(구주소)</label><input name="jibun_address" value="${escapeHtml(row.jibun_address || '')}" readonly /></div>
+      </div>
+      <div style="margin-top:12px"><label>상세주소</label><input name="detail_address" value="${escapeHtml(row.detail_address || '')}" placeholder="동·층·호 등 상세주소" /></div>
+      <input type="hidden" name="address" value="${escapeHtml(row.address || row.road_address || row.jibun_address || '')}" />
+    </div>`;
+}
+
+function bindAddressSearch(scope = modalRoot) {
+  scope.querySelectorAll('.address-search-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      const block = button.closest('.address-block');
+      if (!window.daum?.Postcode) {
+        showToast('주소검색 서비스를 불러오지 못했습니다. 인터넷 연결을 확인하세요.', 'error');
+        return;
+      }
+      new window.daum.Postcode({
+        oncomplete(data) {
+          const selectedType = data.userSelectedType === 'J' ? 'J' : 'R';
+          block.querySelector('[name="postal_code"]').value = data.zonecode || '';
+          block.querySelector('[name="road_address"]').value = data.roadAddress || '';
+          block.querySelector('[name="jibun_address"]').value = data.jibunAddress || data.autoJibunAddress || '';
+          block.querySelector('[name="address_type"]').value = selectedType;
+          block.querySelector('[name="address"]').value = selectedType === 'J'
+            ? (data.jibunAddress || data.autoJibunAddress || data.roadAddress || '')
+            : (data.roadAddress || data.jibunAddress || '');
+          block.querySelector('[name="detail_address"]').focus();
+        }
+      }).open();
+    });
+  });
+}
+
 function formData(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   for (const [key, value] of Object.entries(data)) {
@@ -160,9 +201,9 @@ function renderLogin() {
         <p>주문·수금·생산·재고를 한 화면에서 관리합니다.</p>
         <form id="login-form" class="form-grid">
           <div><label>아이디</label><input name="username" value="admin" autocomplete="username" required /></div>
-          <div><label>비밀번호</label><input name="password" type="password" value="admin1234!" autocomplete="current-password" required /></div>
+          <div><label>비밀번호</label><input name="password" type="password" autocomplete="current-password" required /></div>
           <button type="submit">로그인</button>
-          <div class="muted">초기 계정은 .env의 ADMIN_USERNAME / ADMIN_PASSWORD 값으로 자동 생성됩니다.</div>
+          <div class="muted">관리자가 발급한 아이디와 비밀번호를 입력하세요.</div>
         </form>
       </section>
     </main>`;
@@ -184,6 +225,7 @@ function renderShell() {
   const availablePages = pages.filter((p) => can(p.perm));
   if (!availablePages.some((p) => p.id === state.page)) state.page = availablePages[0]?.id || 'dashboard';
   const isAdmin = state.user?.role_name === 'admin';
+  const mobileQuickPages = availablePages.filter((page) => ['dashboard', 'customers', 'orders', 'payments'].includes(page.id));
   appEl.innerHTML = `
     <div class="app-shell">
       <aside class="sidebar">
@@ -202,6 +244,7 @@ function renderShell() {
         </header>
         <section class="content" id="content"><div class="notice">불러오는 중입니다...</div></section>
       </main>
+      <nav class="mobile-quickbar">${mobileQuickPages.map((page) => `<button data-page="${page.id}" class="${state.page === page.id ? 'active' : ''}">${page.label.replace('/원장','').replace('/출고','').replace('/미수금','')}</button>`).join('')}</nav>
     </div>`;
   appEl.querySelectorAll('[data-page]').forEach((btn) => btn.addEventListener('click', () => showPage(btn.dataset.page)));
   document.getElementById('logout-btn')?.addEventListener('click', () => logout());
@@ -317,10 +360,11 @@ function customerModal(row = {}) {
       <div><label>상태</label><select name="status"><option value="active" ${row.status !== 'inactive' ? 'selected' : ''}>사용</option><option value="inactive" ${row.status === 'inactive' ? 'selected' : ''}>중지</option></select></div>
       <div><label>결제조건</label><input name="payment_terms" value="${escapeHtml(row.payment_terms || '')}" placeholder="카드/월말/현금 등" /></div>
     </div>
-    <div style="margin-top:14px"><label>주소</label><input name="address" value="${escapeHtml(row.address || '')}" /></div>
+    ${addressFields(row)}
     <div style="margin-top:14px"><label>메모</label><textarea name="memo">${escapeHtml(row.memo || '')}</textarea></div>`, {
     onSubmit: (data) => row.id ? api(`/customers/${row.id}`, { method: 'PUT', body: JSON.stringify(data) }) : api('/customers', { method: 'POST', body: JSON.stringify(data) })
   });
+  bindAddressSearch();
 }
 
 async function openLedger(customerId) {
@@ -359,10 +403,11 @@ async function customerSiteModal(row = {}) {
       <div><label>초기미수금</label><input name="opening_receivable" type="number" value="${row.opening_receivable || 0}" /></div>
       <div><label>상태</label><select name="status"><option value="active" ${row.status !== 'inactive' ? 'selected' : ''}>사용</option><option value="inactive" ${row.status === 'inactive' ? 'selected' : ''}>중지</option></select></div>
     </div>
-    <div style="margin-top:14px"><label>주소</label><input name="address" value="${escapeHtml(row.address || '')}" /></div>
+    ${addressFields(row)}
     <div style="margin-top:14px"><label>메모</label><textarea name="memo">${escapeHtml(row.memo || '')}</textarea></div>`, {
     onSubmit: (data) => row.id ? api(`/customer-sites/${row.id}`, { method: 'PUT', body: JSON.stringify(data) }) : api('/customer-sites', { method: 'POST', body: JSON.stringify(data) })
   });
+  bindAddressSearch();
 }
 
 async function renderProducts(el) {
@@ -434,12 +479,22 @@ async function renderOrders(el) {
     <p class="page-subtitle">주문은 거래처의 납품처/지역과 발송구분(택배·영업방문·기타)을 함께 기록합니다.</p>
     <div class="panel">
       <div class="toolbar"><div class="left"><input class="search" id="order-search" placeholder="주문번호, 거래처, 상태" value="${escapeHtml(q)}"/><button id="order-search-btn" class="secondary">검색</button></div><div class="right">${can('orders.write') ? '<button id="order-add">주문 등록</button>' : ''}</div></div>
-      ${table(['일자','주문번호','거래처/납품처','발송구분','박싱','상태','품목','금액','관리'], rows, (o) => `<tr><td>${fmtDate(o.order_date)}</td><td>${escapeHtml(o.order_no)}</td><td>${escapeHtml(o.customer_name)}<br/><span class="muted">${escapeHtml(o.site_name || o.region || '')}</span></td><td>${escapeHtml(o.delivery_type || o.delivery_method || '')}</td><td>${escapeHtml(o.delivery_group)}</td><td>${statusBadge(o.status)}</td><td class="num">${money(o.item_count)}</td><td class="money">${money(o.total_amount)}원</td><td><button class="small secondary" data-view="${o.id}">상세</button> ${can('orders.write') ? `<button class="small" data-ship="${o.id}">출고</button><button class="small danger" data-cancel="${o.id}">취소</button>` : ''}</td></tr>`)}
+      ${table(['일자','주문번호','거래처/납품처','발송구분','박싱','상태','품목','금액','관리'], rows, (o) => `<tr><td>${fmtDate(o.order_date)}</td><td>${escapeHtml(o.order_no)}</td><td>${escapeHtml(o.customer_name)}<br/><span class="muted">${escapeHtml(o.site_name || o.region || '')}</span></td><td>${escapeHtml(o.delivery_type || o.delivery_method || '')}</td><td>${escapeHtml(o.delivery_group)}</td><td>${statusBadge(o.status)}</td><td class="num">${money(o.item_count)}</td><td class="money">${money(o.total_amount)}원</td><td class="action-cell"><button class="small secondary" data-view="${o.id}">상세</button> ${can('orders.write') ? `<button class="small" data-edit-order="${o.id}">수정</button><button class="small" data-ship="${o.id}">출고</button><button class="small secondary" data-cancel="${o.id}">취소</button><button class="small danger" data-delete-order="${o.id}">삭제</button>` : ''}</td></tr>`)}
     </div>`;
   el.querySelector('#order-search-btn').addEventListener('click', () => { state.cache.orderQ = el.querySelector('#order-search').value; renderOrders(el); });
   el.querySelector('#order-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') el.querySelector('#order-search-btn').click(); });
   el.querySelector('#order-add')?.addEventListener('click', openOrderModal);
   el.querySelectorAll('[data-view]').forEach((btn) => btn.addEventListener('click', () => openOrderDetail(btn.dataset.view)));
+  el.querySelectorAll('[data-edit-order]').forEach((btn) => btn.addEventListener('click', () => openOrderEditModal(btn.dataset.editOrder)));
+  el.querySelectorAll('[data-delete-order]').forEach((btn) => btn.addEventListener('click', async () => {
+    const reason = window.prompt('주문 삭제 사유를 입력하세요. 수정이력에 영구 기록됩니다.');
+    if (!reason?.trim()) return;
+    try {
+      await api(`/orders/${btn.dataset.deleteOrder}`, { method: 'DELETE', body: JSON.stringify({ delete_reason: reason.trim() }) });
+      showToast('주문이 삭제 처리되었습니다.');
+      renderOrders(el);
+    } catch (error) { showToast(error.message, 'error'); }
+  }));
   el.querySelectorAll('[data-ship]').forEach((btn) => btn.addEventListener('click', () => openShipModal(btn.dataset.ship)));
   el.querySelectorAll('[data-cancel]').forEach((btn) => btn.addEventListener('click', async () => {
     if (!confirm('주문을 취소하고 매출 미수금도 반대로 조정할까요?')) return;
@@ -449,84 +504,116 @@ async function renderOrders(el) {
   }));
 }
 
-async function openOrderModal() {
+async function openOrderModal(existingData = null) {
   const [customers, products, sites] = await Promise.all([api('/customers?limit=500'), api('/products?limit=500'), api('/customer-sites?limit=1000')]);
-  let items = [{ product_id: products[0]?.id || '', quantity: 1, unit_price: products[0]?.default_price || 0 }];
+  const existing = existingData?.order || {};
+  const isEdit = Boolean(existing.id);
+  let items = isEdit
+    ? existingData.items.map((item) => ({ product_id: item.product_id || '', item_name: item.item_name || '', spec: item.spec || '', quantity: Number(item.quantity || 1), unit_price: Number(item.unit_price || 0) }))
+    : [{ product_id: products[0]?.id || '', quantity: 1, unit_price: products[0]?.default_price || 0 }];
   const productOptions = (selected) => `<option value="">직접입력</option>${optionList(products, selected, (p) => `${p.sku} · ${p.name} · 재고 ${p.current_stock}`)}`;
-  openModal('주문 등록', `
+  const sourceOptions = [['phone','전화'],['kakao','카톡'],['sales_visit','영업방문'],['ecount','이카운트'],['other','기타']]
+    .map(([value, label]) => `<option value="${value}" ${String(existing.source || 'phone') === value ? 'selected' : ''}>${label}</option>`).join('');
+  const groupOptions = ['영업부','다빈치','기타'].map((value) => `<option ${String(existing.delivery_group || '기타') === value ? 'selected' : ''}>${value}</option>`).join('');
+  const methodOptions = ['택배','영업방문','직접수령','기타'].map((value) => `<option ${String(existing.delivery_method || existing.delivery_type || '택배') === value ? 'selected' : ''}>${value}</option>`).join('');
+
+  openModal(isEdit ? `주문 수정 ${existing.order_no}` : '주문 등록', `
     <div class="form-grid three">
-      <div><label>거래처 *</label><select name="customer_id" id="order-customer" required><option value="">선택</option>${optionList(customers, '')}</select></div>
-      <div><label>납품처/지역</label><select name="customer_site_id" id="order-site">${customerSiteOptions(sites)}</select></div>
-      <div><label>발송구분</label><select name="delivery_type" id="order-delivery-type">${deliveryTypeOptions('택배')}</select></div>
-      <div><label>주문일</label><input name="order_date" type="date" value="${today()}" /></div>
-      <div><label>접수경로</label><select name="source"><option value="phone">전화</option><option value="kakao">카톡</option><option value="sales_visit">영업방문</option><option value="ecount">이카운트</option><option value="other">기타</option></select></div>
-      <div><label>발송구분</label><select name="delivery_type">${deliveryTypeOptions('택배')}</select></div>
-      <div><label>박싱구분</label><select name="delivery_group"><option>영업부</option><option>다빈치</option><option selected>기타</option></select></div>
-      <div><label>배송방법</label><select name="delivery_method"><option selected>택배</option><option>영업방문</option><option>직접수령</option></select></div>
-      <div><label>상태</label><select name="status"><option value="confirmed" selected>주문확정</option><option value="draft">임시</option></select></div>
+      <div><label>거래처 *</label><select name="customer_id" id="order-customer" required><option value="">선택</option>${optionList(customers, existing.customer_id || '')}</select></div>
+      <div><label>납품처/지역</label><select name="customer_site_id" id="order-site">${customerSiteOptions(sites, existing.customer_site_id || '', existing.customer_id || '')}</select></div>
+      <div><label>발송구분</label><select name="delivery_type" id="order-delivery-type">${deliveryTypeOptions(existing.delivery_type || '택배')}</select></div>
+      <div><label>주문일</label><input name="order_date" type="date" value="${fmtDate(existing.order_date) || today()}" /></div>
+      <div><label>접수경로</label><select name="source">${sourceOptions}</select></div>
+      <div><label>박싱구분</label><select name="delivery_group">${groupOptions}</select></div>
+      <div><label>배송방법</label><select name="delivery_method">${methodOptions}</select></div>
+      <div><label>부가세</label><input name="vat_amount" type="number" value="${Number(existing.vat_amount || 0)}" /></div>
+      ${isEdit ? '<div><label>수정 사유</label><input name="change_reason" required placeholder="잘못 입력된 항목 수정 등" /></div>' : ''}
     </div>
     <div style="margin-top:16px"><label>품목</label><div id="order-items"></div><button type="button" class="secondary small" id="add-item">품목 추가</button></div>
-    <div style="margin-top:14px"><label>메모</label><textarea name="memo"></textarea></div>`, {
-    submitText: '주문 저장',
+    <div style="margin-top:14px"><label>메모</label><textarea name="memo">${escapeHtml(existing.memo || '')}</textarea></div>`, {
+    submitText: isEdit ? '수정 저장' : '주문 저장',
     onSubmit: (data) => {
       const formItems = [...modalRoot.querySelectorAll('.item-row')].map((row) => ({
         product_id: row.querySelector('[name="product_id"]').value || null,
         item_name: row.querySelector('[name="item_name"]').value || null,
+        spec: row.querySelector('[name="spec"]').value || null,
         quantity: Number(row.querySelector('[name="quantity"]').value || 0),
         unit_price: Number(row.querySelector('[name="unit_price"]').value || 0)
       })).filter((item) => item.product_id || item.item_name);
-      return api('/orders', { method: 'POST', body: JSON.stringify({ ...data, items: formItems }) });
+      return api(isEdit ? `/orders/${existing.id}` : '/orders', { method: isEdit ? 'PUT' : 'POST', body: JSON.stringify({ ...data, items: formItems }) });
     }
   });
+
   const customerSelect = modalRoot.querySelector('#order-customer');
   const siteSelect = modalRoot.querySelector('#order-site');
   const deliverySelect = modalRoot.querySelector('#order-delivery-type');
-  function refreshSites() {
+  function refreshSites(preserveSelection = false) {
     const customerId = customerSelect.value;
-    siteSelect.innerHTML = customerSiteOptions(sites, '', customerId);
+    const selected = preserveSelection ? siteSelect.value : '';
+    siteSelect.innerHTML = customerSiteOptions(sites, selected, customerId);
     const firstSite = sites.find((site) => String(site.customer_id) === String(customerId));
-    if (firstSite) {
+    if (!selected && firstSite) {
       siteSelect.value = firstSite.id;
       deliverySelect.value = firstSite.default_delivery_type || '택배';
     }
   }
-  customerSelect.addEventListener('change', refreshSites);
+  customerSelect.addEventListener('change', () => refreshSites(false));
   siteSelect.addEventListener('change', () => {
     const selectedSite = sites.find((site) => String(site.id) === String(siteSelect.value));
     if (selectedSite?.default_delivery_type) deliverySelect.value = selectedSite.default_delivery_type;
   });
+
   function renderItemRows() {
     const wrap = modalRoot.querySelector('#order-items');
     wrap.innerHTML = items.map((item, idx) => {
       const product = products.find((p) => String(p.id) === String(item.product_id));
+      const qty = Number(item.quantity || 0);
+      const price = Number(item.unit_price ?? product?.default_price ?? 0);
       return `<div class="item-row" data-idx="${idx}">
-        <div><select name="product_id">${productOptions(item.product_id)}</select><input name="item_name" placeholder="직접입력 품목명" value="${escapeHtml(product ? product.name : item.item_name || '')}" /></div>
-        <div><label>수량</label><input name="quantity" type="number" value="${item.quantity || 1}" /></div>
-        <div><label>단가</label><input name="unit_price" type="number" value="${item.unit_price || product?.default_price || 0}" /></div>
-        <div><label>금액</label><input readonly value="${money((item.quantity || 0) * (item.unit_price || product?.default_price || 0))}" /></div>
+        <div><label>제품</label><select name="product_id">${productOptions(item.product_id)}</select><input name="item_name" placeholder="직접입력 품목명" value="${escapeHtml(product ? product.name : item.item_name || '')}" /><input name="spec" placeholder="규격" value="${escapeHtml(item.spec || product?.spec || '')}" /></div>
+        <div><label>수량</label><input name="quantity" type="number" value="${qty || 1}" /></div>
+        <div><label>단가</label><input name="unit_price" type="number" value="${price}" /></div>
+        <div><label>금액</label><input readonly value="${money((qty || 0) * price)}" /></div>
         <button type="button" class="danger small" data-remove="${idx}">삭제</button>
       </div>`;
     }).join('');
-    wrap.querySelectorAll('[name="product_id"]').forEach((select) => select.addEventListener('change', (e) => {
-      const row = e.target.closest('.item-row');
+    wrap.querySelectorAll('[name="product_id"]').forEach((select) => select.addEventListener('change', (event) => {
+      const row = event.target.closest('.item-row');
       const idx = Number(row.dataset.idx);
-      const product = products.find((p) => String(p.id) === e.target.value);
-      items[idx].product_id = e.target.value;
+      const product = products.find((p) => String(p.id) === event.target.value);
+      items[idx].product_id = event.target.value;
       items[idx].item_name = product?.name || '';
-      items[idx].unit_price = product?.default_price || 0;
+      items[idx].spec = product?.spec || '';
+      items[idx].unit_price = Number(product?.default_price || 0);
       renderItemRows();
     }));
-    wrap.querySelectorAll('[name="quantity"], [name="unit_price"], [name="item_name"]').forEach((input) => input.addEventListener('input', (e) => {
-      const row = e.target.closest('.item-row');
+    wrap.querySelectorAll('[name="quantity"], [name="unit_price"], [name="item_name"], [name="spec"]').forEach((input) => input.addEventListener('input', (event) => {
+      const row = event.target.closest('.item-row');
       const idx = Number(row.dataset.idx);
       items[idx].quantity = Number(row.querySelector('[name="quantity"]').value || 0);
       items[idx].unit_price = Number(row.querySelector('[name="unit_price"]').value || 0);
       items[idx].item_name = row.querySelector('[name="item_name"]').value;
+      items[idx].spec = row.querySelector('[name="spec"]').value;
     }));
-    wrap.querySelectorAll('[data-remove]').forEach((btn) => btn.addEventListener('click', () => { items.splice(Number(btn.dataset.remove), 1); renderItemRows(); }));
+    wrap.querySelectorAll('[data-remove]').forEach((button) => button.addEventListener('click', () => {
+      items.splice(Number(button.dataset.remove), 1);
+      if (items.length === 0) items.push({ product_id: '', quantity: 1, unit_price: 0 });
+      renderItemRows();
+    }));
   }
   modalRoot.querySelector('#add-item').addEventListener('click', () => { items.push({ product_id: '', quantity: 1, unit_price: 0 }); renderItemRows(); });
   renderItemRows();
+}
+
+async function openOrderEditModal(id) {
+  try {
+    const data = await api(`/orders/${id}`);
+    if (data.shipments?.length) {
+      showToast('출고 이력이 있는 주문은 화면에서 직접 수정할 수 없습니다.', 'error');
+      return;
+    }
+    await openOrderModal(data);
+  } catch (error) { showToast(error.message, 'error'); }
 }
 
 async function openOrderDetail(id) {
@@ -575,7 +662,7 @@ async function renderPayments(el) {
         <div class="form-actions" style="grid-column:1/-1"><button type="submit">수금 저장</button></div></form>` : ''}
     </div>
     <div class="panel"><h3>발송구분별 미수금</h3>${table(['거래처','납품처','발송구분','매출','수금','미수'], byDelivery, (r) => `<tr><td>${escapeHtml(r.customer_name)}</td><td>${escapeHtml(r.site_name || '')}</td><td>${escapeHtml(r.delivery_type)}</td><td class="money">${money(r.sales_amount)}원</td><td class="money">${money(r.payment_amount)}원</td><td class="money">${money(r.receivable_balance)}원</td></tr>`)}</div>
-    <div class="panel"><h3>최근 수금</h3>${table(['일자','수금번호','거래처/납품처','발송구분','방법','금액','승인/비고'], payments, (p) => `<tr><td>${fmtDate(p.payment_date)}</td><td>${escapeHtml(p.payment_no)}</td><td>${escapeHtml(p.customer_name)}<br/><span class="muted">${escapeHtml(p.site_name || p.region || '')}</span></td><td>${escapeHtml(p.delivery_type || '')}</td><td>${statusBadge(p.method)}</td><td class="money">${money(p.amount)}원</td><td>${escapeHtml(p.approval_no || p.memo || '')}</td></tr>`)}</div>`;
+    <div class="panel"><h3>최근 수금</h3>${table(['일자','수금번호','거래처/납품처','발송구분','방법','금액','승인/비고','관리'], payments, (p) => `<tr><td>${fmtDate(p.payment_date)}</td><td>${escapeHtml(p.payment_no)}</td><td>${escapeHtml(p.customer_name)}<br/><span class="muted">${escapeHtml(p.site_name || p.region || '')}</span></td><td>${escapeHtml(p.delivery_type || '')}</td><td>${statusBadge(p.method)}</td><td class="money">${money(p.amount)}원</td><td>${escapeHtml(p.approval_no || p.memo || '')}</td><td class="action-cell">${can('payments.write') ? `<button class="small" data-edit-payment="${p.id}">수정</button><button class="small danger" data-delete-payment="${p.id}">삭제</button>` : ''}</td></tr>`)}</div>`;
   const customerSelect = el.querySelector('#payment-customer');
   const siteSelect = el.querySelector('#payment-site');
   const deliverySelect = el.querySelector('#payment-delivery-type');
@@ -600,6 +687,53 @@ async function renderPayments(el) {
       showToast('수금 등록 완료');
       renderPayments(el);
     } catch (error) { showToast(error.message, 'error'); }
+  });
+  el.querySelectorAll('[data-edit-payment]').forEach((button) => button.addEventListener('click', () => {
+    const row = payments.find((payment) => String(payment.id) === String(button.dataset.editPayment));
+    if (row) openPaymentEditModal(row, customers, sites);
+  }));
+  el.querySelectorAll('[data-delete-payment]').forEach((button) => button.addEventListener('click', async () => {
+    const reason = window.prompt('수금 삭제 사유를 입력하세요. 수정이력에 영구 기록됩니다.');
+    if (!reason?.trim()) return;
+    try {
+      await api(`/payments/${button.dataset.deletePayment}`, { method: 'DELETE', body: JSON.stringify({ delete_reason: reason.trim() }) });
+      showToast('수금이 삭제 처리되었습니다.');
+      renderPayments(el);
+    } catch (error) { showToast(error.message, 'error'); }
+  }));
+}
+
+function openPaymentEditModal(row, customers, sites) {
+  const methods = [['card','카드'],['bank','송금'],['cash','현금'],['other','기타']]
+    .map(([value, label]) => `<option value="${value}" ${String(row.method || 'card') === value ? 'selected' : ''}>${label}</option>`).join('');
+  openModal(`수금 수정 ${row.payment_no}`, `
+    <div class="form-grid three">
+      <div><label>거래처 *</label><select name="customer_id" id="edit-payment-customer" required>${optionList(customers, row.customer_id)}</select></div>
+      <div><label>납품처/지역</label><select name="customer_site_id" id="edit-payment-site">${customerSiteOptions(sites, row.customer_site_id || '', row.customer_id)}</select></div>
+      <div><label>발송구분</label><select name="delivery_type" id="edit-payment-delivery">${deliveryTypeOptions(row.delivery_type || '택배')}</select></div>
+      <div><label>수금일</label><input name="payment_date" type="date" value="${fmtDate(row.payment_date)}" /></div>
+      <div><label>방법</label><select name="method">${methods}</select></div>
+      <div><label>금액 *</label><input name="amount" type="number" value="${Number(row.amount || 0)}" required /></div>
+      <div><label>카드사</label><input name="card_company" value="${escapeHtml(row.card_company || '')}" /></div>
+      <div><label>승인번호</label><input name="approval_no" value="${escapeHtml(row.approval_no || '')}" /></div>
+      <div><label>은행명</label><input name="bank_name" value="${escapeHtml(row.bank_name || '')}" /></div>
+      <div style="grid-column:1/-1"><label>수정 사유 *</label><input name="change_reason" required placeholder="잘못 입력된 금액 수정 등" /></div>
+      <div style="grid-column:1/-1"><label>비고</label><input name="memo" value="${escapeHtml(row.memo || '')}" /></div>
+    </div>`, {
+    submitText: '수정 저장',
+    onSubmit: (data) => api(`/payments/${row.id}`, { method: 'PUT', body: JSON.stringify(data) })
+  });
+  const customerSelect = modalRoot.querySelector('#edit-payment-customer');
+  const siteSelect = modalRoot.querySelector('#edit-payment-site');
+  const deliverySelect = modalRoot.querySelector('#edit-payment-delivery');
+  customerSelect?.addEventListener('change', () => {
+    siteSelect.innerHTML = customerSiteOptions(sites, '', customerSelect.value);
+    const first = sites.find((site) => String(site.customer_id) === String(customerSelect.value));
+    if (first) { siteSelect.value = first.id; deliverySelect.value = first.default_delivery_type || '택배'; }
+  });
+  siteSelect?.addEventListener('change', () => {
+    const selected = sites.find((site) => String(site.id) === String(siteSelect.value));
+    if (selected?.default_delivery_type) deliverySelect.value = selected.default_delivery_type;
   });
 }
 
@@ -647,7 +781,7 @@ async function renderAudit(el) {
     <h1 class="page-title">수정이력</h1>
     <p class="page-subtitle">자료가 수정되면 이전값과 이후값을 함께 저장하여 추적합니다.</p>
     <div class="panel"><div class="toolbar"><div class="left"><select id="audit-table"><option value="">전체 테이블</option>${['customers','products','sales_orders','payments','production_orders','inventory_transactions','users'].map((t) => `<option value="${t}" ${tableName === t ? 'selected' : ''}>${t}</option>`).join('')}</select><button id="audit-search" class="secondary">조회</button></div></div>
-      ${table(['시각','테이블','ID','작업','사용자','이전/이후'], rows, (r) => `<tr><td>${escapeHtml(String(r.changed_at || '').slice(0, 19).replace('T',' '))}</td><td>${escapeHtml(r.table_name)}</td><td>${escapeHtml(r.record_id)}</td><td>${escapeHtml(r.action)}</td><td>${escapeHtml(r.full_name || r.username || '')}</td><td><details><summary>보기</summary><div class="json-box">이전\n${escapeHtml(JSON.stringify(r.before_data, null, 2))}\n\n이후\n${escapeHtml(JSON.stringify(r.after_data, null, 2))}</div></details></td></tr>`)}
+      ${table(['시각','테이블','ID','작업','사용자','사유/IP','이전/이후'], rows, (r) => `<tr><td>${escapeHtml(String(r.changed_at || '').slice(0, 19).replace('T',' '))}</td><td>${escapeHtml(r.table_name)}</td><td>${escapeHtml(r.record_id)}</td><td>${escapeHtml(r.action)}</td><td>${escapeHtml(r.full_name || r.username || '')}</td><td>${escapeHtml(r.change_reason || '')}<br/><span class="muted">${escapeHtml(r.ip_address || '')}</span></td><td><details><summary>보기</summary><div class="json-box">이전\n${escapeHtml(JSON.stringify(r.before_data, null, 2))}\n\n이후\n${escapeHtml(JSON.stringify(r.after_data, null, 2))}</div></details></td></tr>`)}
     </div>`;
   el.querySelector('#audit-search').addEventListener('click', () => { state.cache.auditTable = el.querySelector('#audit-table').value; renderAudit(el); });
 }
@@ -696,15 +830,21 @@ async function renderImports(el) {
   const batches = await api('/imports/batches?limit=100');
   el.innerHTML = `
     <h1 class="page-title">엑셀가져오기</h1>
-    <p class="page-subtitle">거래처원장, 기간별 판매명세서, 수금(미수금)명세서 엑셀을 업로드하여 거래처·제품·주문·미수금을 등록합니다.</p>
-    <div class="panel"><h3>엑셀 파일 업로드</h3><form id="excel-import-form"><input type="file" name="files" multiple accept=".xls,.xlsx" /><div class="muted" style="margin-top:8px">지원: 거래처원장.xls, 기간별 판매명세서 상세.xls, 수금(미수금)명세서.xls, 거래처별 영업현황 거래내역.xls</div><div class="form-actions"><button type="submit">엑셀 가져오기 실행</button></div></form><div id="import-result"></div></div>
+    <p class="page-subtitle">지정 엑셀 3종을 업로드하면 거래처·판매·수금 자료를 자동 판별해 등록합니다. 누락된 발송구분·수금방법은 기타로 기록되므로 등록 후 확인하세요.</p>
+    <div class="panel"><h3>엑셀 파일 업로드</h3>
+      <div class="upload-guide">
+        <strong>우선 업로드할 파일</strong>
+        <ol><li>거래처 정보.xls</li><li>판매처 원장 상세.xls</li><li>일별영업현황.xls</li></ol>
+        <div class="muted">기존 파일명(거래처원장.xls, 기간별 판매명세서 상세.xls, 수금(미수금)명세서.xls, 거래처별 영업현황 거래내역.xls)도 계속 지원합니다.</div>
+      </div>
+      <form id="excel-import-form"><input type="file" name="files" multiple accept=".xls,.xlsx" required /><div class="form-actions"><button type="submit">선택한 엑셀 등록</button></div></form><div id="import-result"></div></div>
     <div class="panel"><h3>최근 가져오기 이력</h3>${table(['일시','파일명','유형','상태','전체','등록','수정','건너뜀','오류','사용자'], batches, (b) => `<tr><td>${escapeHtml(String(b.imported_at || '').slice(0,19).replace('T',' '))}</td><td>${escapeHtml(b.file_name)}</td><td>${escapeHtml(b.file_type || '')}</td><td>${statusBadge(b.status)}</td><td class="num">${money(b.total_rows)}</td><td class="num">${money(b.inserted_rows)}</td><td class="num">${money(b.updated_rows)}</td><td class="num">${money(b.skipped_rows)}</td><td class="num">${money(b.error_rows)}</td><td>${escapeHtml(b.imported_by_name || '')}</td></tr>`)}</div>`;
   el.querySelector('#excel-import-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const fd = new FormData(event.currentTarget);
     try {
       const result = await api('/imports/excel', { method: 'POST', body: fd });
-      document.getElementById('import-result').innerHTML = `<div class="notice">가져오기 완료: ${escapeHtml(JSON.stringify(result))}</div>`;
+      document.getElementById('import-result').innerHTML = `<div class="success"><strong>가져오기 완료</strong>${result.map((item) => `<div>${escapeHtml(item.file_name)} · 유형 ${escapeHtml(item.file_type)} · 등록 ${money(item.inserted)} · 수정 ${money(item.updated)} · 건너뜀 ${money(item.skipped)} · 오류 ${money(item.errors)}</div>`).join('')}</div>`;
       showToast('엑셀 가져오기가 완료되었습니다.');
       renderImports(el);
     } catch (error) {

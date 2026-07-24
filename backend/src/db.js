@@ -382,6 +382,50 @@ async function ensureV14Schema(targetPool) {
   await targetPool.execute('INSERT IGNORE INTO schema_migrations(version) VALUES (?)', ['2026-07-22-v1.4-aws-delivery-type-sites']);
 }
 
+
+async function ensureV15Schema(targetPool) {
+  // v1.5: 주소검색 상세필드, 주문/수금 논리삭제, 감사 사유 저장
+  const addressColumns = [
+    ['postal_code', 'VARCHAR(20) NULL'],
+    ['road_address', 'VARCHAR(255) NULL'],
+    ['jibun_address', 'VARCHAR(255) NULL'],
+    ['detail_address', 'VARCHAR(255) NULL'],
+    ['address_type', 'VARCHAR(20) NULL']
+  ];
+  for (const tableName of ['customers', 'customer_sites']) {
+    for (const [name, definition] of addressColumns) {
+      await ensureColumn(targetPool, tableName, name, definition);
+    }
+  }
+
+  const orderColumns = [
+    ['deleted_at', 'DATETIME NULL'],
+    ['deleted_by', 'BIGINT UNSIGNED NULL'],
+    ['delete_reason', 'VARCHAR(500) NULL']
+  ];
+  for (const [name, definition] of orderColumns) {
+    await ensureColumn(targetPool, 'sales_orders', name, definition);
+  }
+
+  const paymentColumns = [
+    ['updated_by', 'BIGINT UNSIGNED NULL'],
+    ['status', "VARCHAR(30) NOT NULL DEFAULT 'active'"],
+    ['deleted_at', 'DATETIME NULL'],
+    ['deleted_by', 'BIGINT UNSIGNED NULL'],
+    ['delete_reason', 'VARCHAR(500) NULL']
+  ];
+  for (const [name, definition] of paymentColumns) {
+    await ensureColumn(targetPool, 'payments', name, definition);
+  }
+
+  await ensureColumn(targetPool, 'audit_logs', 'change_reason', 'VARCHAR(500) NULL');
+  await ensureIndex(targetPool, 'sales_orders', 'idx_sales_orders_deleted_at', 'CREATE INDEX idx_sales_orders_deleted_at ON sales_orders(deleted_at)');
+  await ensureIndex(targetPool, 'payments', 'idx_payments_deleted_at', 'CREATE INDEX idx_payments_deleted_at ON payments(deleted_at)');
+  await ensureIndex(targetPool, 'payments', 'idx_payments_status', 'CREATE INDEX idx_payments_status ON payments(status)');
+
+  await targetPool.execute('INSERT IGNORE INTO schema_migrations(version) VALUES (?)', ['2026-07-24-v1.5-security-mobile-address-audit']);
+}
+
 async function initDb() {
   if (pool) return pool;
   if (initPromise) return initPromise;
@@ -395,6 +439,7 @@ async function initDb() {
       await seedAdminUser(pool);
       await ensureV13Schema(pool);
       await ensureV14Schema(pool);
+      await ensureV15Schema(pool);
     }
     return pool;
   })();

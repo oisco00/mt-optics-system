@@ -9,11 +9,77 @@ const { importExcelBuffer } = require('./excelImport');
 const app = express();
 const api = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-long-random-secret';
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 10 } });
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
+const MAX_EXCEL_FILE_MB = Math.max(Number(process.env.MAX_EXCEL_FILE_MB || 20), 1);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_EXCEL_FILE_MB * 1024 * 1024, files: 10, fields: 20, parts: 30, fieldNestingDepth: 4 },
+  fileFilter: (req, file, cb) => {
+    const allowed = /\.(xls|xlsx)$/i.test(file.originalname || '');
+    cb(allowed ? null : badRequest('엑셀 파일(.xls, .xlsx)만 업로드할 수 있습니다.'), allowed);
+  }
+});
 
 app.disable('x-powered-by');
-app.use(cors({ origin: process.env.CORS_ORIGIN === '*' ? true : (process.env.CORS_ORIGIN || true), credentials: true }));
+app.set('trust proxy', Number(process.env.TRUST_PROXY || 1));
+
+const allowedOrigins = String(process.env.CORS_ORIGIN || '*')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(forbidden('허용되지 않은 접속 주소입니다.'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' https://t1.daumcdn.net https://postcode.map.daum.net 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; frame-src https://postcode.map.daum.net; object-src 'none'; base-uri 'self'; form-action 'self'");
+  next();
+});
 app.use(express.json({ limit: '3mb' }));
+
+function createRateLimiter({ windowMs, max, message }) {
+  const buckets = new Map();
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = `${req.ip || 'unknown'}:${req.path}`;
+    const current = buckets.get(key);
+    if (!current || current.resetAt <= now) {
+      buckets.set(key, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    current.count += 1;
+    if (current.count > max) {
+      res.setHeader('Retry-After', Math.ceil((current.resetAt - now) / 1000));
+      return res.status(429).json({ ok: false, error: message });
+    }
+    if (buckets.size > 5000) {
+      for (const [bucketKey, value] of buckets.entries()) if (value.resetAt <= now) buckets.delete(bucketKey);
+    }
+    return next();
+  };
+}
+
+const apiLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: Math.max(Number(process.env.API_RATE_LIMIT_PER_15M || 1200), 100),
+  message: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.'
+});
+const loginLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: Math.max(Number(process.env.LOGIN_RATE_LIMIT_PER_15M || 20), 5),
+  message: '로그인 시도가 너무 많습니다. 15분 후 다시 시도하세요.'
+});
+app.use('/api', apiLimiter);
 
 function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -57,10 +123,28 @@ function todayKst() {
   return now.toISOString().slice(0, 10);
 }
 
+function dateText(value, fallback = null) {
+  if (!value) return fallback;
+  const text = String(value);
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) return new Date(date.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return fallback;
+}
+
 function clean(value) {
   if (value === undefined || value === null) return null;
   const trimmed = String(value).trim();
   return trimmed === '' ? null : trimmed;
+}
+
+
+function isExcelFileBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return false;
+  const isZip = buffer[0] === 0x50 && buffer[1] === 0x4b;
+  const isOle = buffer[0] === 0xd0 && buffer[1] === 0xcf && buffer[2] === 0x11 && buffer[3] === 0xe0;
+  return isZip || isOle;
 }
 
 function publicUser(user) {
@@ -105,10 +189,11 @@ async function getRecord(conn, tableName, id) {
   return rows[0] || null;
 }
 
-async function auditLog(conn, tableName, recordId, action, beforeData, afterData, req) {
+async function auditLog(conn, tableName, recordId, action, beforeData, afterData, req, reason = null) {
+  const changeReason = clean(reason || req.body?.delete_reason || req.body?.change_reason || req.body?.reason);
   await conn.execute(
-    `INSERT INTO audit_logs(table_name, record_id, action, before_data, after_data, changed_by, ip_address, user_agent)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO audit_logs(table_name, record_id, action, before_data, after_data, changed_by, ip_address, user_agent, change_reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       tableName,
       String(recordId),
@@ -117,7 +202,8 @@ async function auditLog(conn, tableName, recordId, action, beforeData, afterData
       afterData ? JSON.stringify(afterData) : null,
       req.user?.id || null,
       req.ip || null,
-      String(req.get('user-agent') || '').slice(0, 255)
+      String(req.get('user-agent') || '').slice(0, 255),
+      changeReason
     ]
   );
 }
@@ -174,6 +260,12 @@ function requirePermission(code) {
   };
 }
 
+function assertCanModifyRecord(req, record, ownerFields = ['created_by']) {
+  if (req.user?.role_name === 'admin' || req.user?.role_name === 'accounting') return;
+  const owned = ownerFields.some((field) => Number(record?.[field] || 0) === Number(req.user?.id || 0));
+  if (!owned) throw forbidden('본인이 등록한 자료만 수정하거나 삭제할 수 있습니다.');
+}
+
 function pick(body, allowed) {
   const result = {};
   for (const key of allowed) {
@@ -196,11 +288,11 @@ function normalizeDeliveryType(value, defaultValue = '택배') {
 function normalizeCustomerSitePayload(body) {
   const data = pick(body, [
     'customer_id', 'site_code', 'site_name', 'original_customer_name', 'business_no', 'owner_name', 'phone', 'mobile',
-    'address', 'region', 'default_delivery_type', 'default_delivery_group', 'sales_rep_id', 'opening_receivable',
+    'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'default_delivery_type', 'default_delivery_group', 'sales_rep_id', 'opening_receivable',
     'credit_limit', 'status', 'memo'
   ]);
   if (Object.prototype.hasOwnProperty.call(data, 'customer_id')) data.customer_id = toInt(data.customer_id);
-  for (const key of ['site_code', 'site_name', 'original_customer_name', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'region', 'default_delivery_group', 'status', 'memo']) {
+  for (const key of ['site_code', 'site_name', 'original_customer_name', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'default_delivery_group', 'status', 'memo']) {
     if (Object.prototype.hasOwnProperty.call(data, key)) data[key] = clean(data[key]);
   }
   if (Object.prototype.hasOwnProperty.call(data, 'default_delivery_type')) data.default_delivery_type = normalizeDeliveryType(data.default_delivery_type);
@@ -213,13 +305,13 @@ function normalizeCustomerSitePayload(body) {
 
 function normalizeCustomerPayload(body) {
   const data = pick(body, [
-    'code', 'name', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'region',
+    'code', 'name', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region',
     'sales_rep_id', 'payment_terms', 'opening_receivable', 'credit_limit', 'status', 'memo'
   ]);
   if (Object.prototype.hasOwnProperty.call(data, 'name') && !clean(data.name)) {
     throw badRequest('거래처명은 필수입니다.');
   }
-  for (const key of ['code', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'region', 'payment_terms', 'status', 'memo']) {
+  for (const key of ['code', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'payment_terms', 'status', 'memo']) {
     if (Object.prototype.hasOwnProperty.call(data, key)) data[key] = clean(data[key]);
   }
   if (Object.prototype.hasOwnProperty.call(data, 'sales_rep_id')) data.sales_rep_id = data.sales_rep_id ? toInt(data.sales_rep_id) : null;
@@ -345,13 +437,44 @@ function suggestedProductionQty(product) {
   return shortage > 0 ? Math.max(lot, Math.ceil(shortage / lot) * lot) : lot;
 }
 
+async function normalizeOrderItems(conn, items) {
+  if (!Array.isArray(items) || items.length === 0) throw badRequest('주문 품목을 1개 이상 입력하세요.');
+  const normalizedItems = [];
+  for (const raw of items) {
+    const productId = raw.product_id ? toInt(raw.product_id) : null;
+    let product = null;
+    if (productId) {
+      const [productRows] = await conn.execute("SELECT * FROM products WHERE id = ? AND status <> 'deleted'", [productId]);
+      product = productRows[0];
+      if (!product) throw badRequest(`제품 ID ${productId}를 찾을 수 없습니다.`);
+    }
+    const quantity = toInt(raw.quantity);
+    if (quantity === 0) throw badRequest('품목 수량은 0이 될 수 없습니다.');
+    const unitPrice = raw.unit_price !== undefined && raw.unit_price !== null && raw.unit_price !== ''
+      ? toMoney(raw.unit_price)
+      : toMoney(product?.default_price);
+    const itemName = clean(raw.item_name) || product?.name;
+    if (!itemName) throw badRequest('품목명을 입력하세요.');
+    normalizedItems.push({
+      product_id: productId,
+      item_name: itemName,
+      spec: clean(raw.spec) || product?.spec || null,
+      quantity,
+      unit_price: unitPrice,
+      amount: quantity * unitPrice,
+      memo: clean(raw.memo)
+    });
+  }
+  return normalizedItems;
+}
+
 api.get('/health', asyncHandler(async (req, res) => {
   const pool = await initDb();
   const [rows] = await pool.query('SELECT 1 AS ok');
   respond(res, { status: 'ok', database: rows[0]?.ok === 1, time: new Date().toISOString() });
 }));
 
-api.post('/auth/login', asyncHandler(async (req, res) => {
+api.post('/auth/login', loginLimiter, asyncHandler(async (req, res) => {
   const pool = await initDb();
   const username = clean(req.body.username);
   const password = String(req.body.password || '');
@@ -372,7 +495,7 @@ api.post('/auth/login', asyncHandler(async (req, res) => {
   if (!ok) throw forbidden('계정 정보가 올바르지 않습니다.');
   await pool.execute('UPDATE users SET last_login_at = NOW() WHERE id = ?', [user.id]);
   const loaded = await loadUserById(user.id);
-  const token = jwt.sign({ sub: String(user.id), username: user.username }, JWT_SECRET, { expiresIn: '12h' });
+  const token = jwt.sign({ sub: String(user.id), username: user.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
   respond(res, { token, user: publicUser(loaded) });
 }));
 
@@ -388,6 +511,9 @@ api.post('/auth/logout', asyncHandler(async (req, res) => {
 
 api.post('/system/shutdown', asyncHandler(async (req, res) => {
   if (req.user.role_name !== 'admin') throw forbidden('관리자만 프로그램을 종료할 수 있습니다.');
+  if (!['1', 'true', 'yes', 'on'].includes(String(process.env.ALLOW_REMOTE_SHUTDOWN || 'false').toLowerCase())) {
+    throw forbidden('운영 서버에서는 원격 프로그램 종료가 비활성화되어 있습니다. PM2로 재시작하거나 중지하세요.');
+  }
   respond(res, { message: '데이터베이스 연결을 정상 종료하고 프로그램을 종료합니다.' });
   setTimeout(async () => {
     try { await closeDb(); } catch (error) { console.error(error); }
@@ -552,6 +678,9 @@ api.post('/imports/excel', requirePermission('imports.manage'), upload.array('fi
   const pool = await getPool();
   const results = [];
   for (const file of req.files) {
+    if (!isExcelFileBuffer(file.buffer)) {
+      throw badRequest(`${file.originalname}: 파일 내용이 올바른 Excel 형식이 아닙니다.`);
+    }
     const result = await importExcelBuffer(pool, {
       buffer: file.buffer,
       fileName: file.originalname,
@@ -574,11 +703,13 @@ api.get('/dashboard', requirePermission('dashboard.view'), asyncHandler(async (r
   const [[orderStats]] = await pool.query(
     `SELECT SUM(CASE WHEN status NOT IN ('delivered', 'canceled') THEN 1 ELSE 0 END) AS open_orders,
             COALESCE(SUM(CASE WHEN status <> 'canceled' AND order_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN total_amount ELSE 0 END), 0) AS sales_30d
-       FROM sales_orders`
+       FROM sales_orders
+      WHERE deleted_at IS NULL`
   );
   const [[paymentStats]] = await pool.query(
     `SELECT COALESCE(SUM(CASE WHEN payment_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN amount ELSE 0 END), 0) AS payments_30d
-       FROM payments`
+       FROM payments
+      WHERE deleted_at IS NULL`
   );
   const [[receivableStats]] = await pool.query(
     `SELECT COALESCE(SUM(receivable_balance), 0) AS total_receivable FROM v_customer_receivable_balance`
@@ -598,6 +729,7 @@ api.get('/dashboard', requirePermission('dashboard.view'), asyncHandler(async (r
     `SELECT so.id, so.order_no, so.order_date, so.status, so.delivery_type, so.delivery_group, so.total_amount, c.name AS customer_name
        FROM sales_orders so
        JOIN customers c ON c.id = so.customer_id
+      WHERE so.deleted_at IS NULL
       ORDER BY so.created_at DESC
       LIMIT 8`
   );
@@ -605,6 +737,7 @@ api.get('/dashboard', requirePermission('dashboard.view'), asyncHandler(async (r
     `SELECT p.id, p.payment_no, p.payment_date, p.delivery_type, p.method, p.amount, c.name AS customer_name
        FROM payments p
        JOIN customers c ON c.id = p.customer_id
+      WHERE p.deleted_at IS NULL
       ORDER BY p.created_at DESC
       LIMIT 8`
   );
@@ -917,7 +1050,7 @@ api.get('/inventory-transactions', requirePermission('products.read'), asyncHand
 api.get('/orders', requirePermission('orders.read'), asyncHandler(async (req, res) => {
   const pool = await getPool();
   const params = [];
-  let where = 'WHERE 1=1';
+  let where = 'WHERE so.deleted_at IS NULL';
   const q = clean(req.query.q);
   if (q) {
     where += ' AND (so.order_no LIKE ? OR c.name LIKE ? OR cs.site_name LIKE ? OR so.delivery_type LIKE ? OR so.delivery_group LIKE ? OR so.status LIKE ?)';
@@ -954,7 +1087,7 @@ api.get('/orders/:id', requirePermission('orders.read'), asyncHandler(async (req
        FROM sales_orders so
        JOIN customers c ON c.id = so.customer_id
        LEFT JOIN customer_sites cs ON cs.id = so.customer_site_id
-      WHERE so.id = ?`,
+      WHERE so.id = ? AND so.deleted_at IS NULL`,
     [id]
   );
   if (!orders[0]) throw notFound('주문을 찾을 수 없습니다.');
@@ -1074,6 +1207,132 @@ api.post('/orders', requirePermission('orders.write'), asyncHandler(async (req, 
   respond(res, created, 201);
 }));
 
+api.put('/orders/:id', requirePermission('orders.write'), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const body = req.body || {};
+  const updated = await withTransaction(async (conn) => {
+    const before = await getRecord(conn, 'sales_orders', id);
+    if (!before || before.deleted_at) throw notFound('주문을 찾을 수 없습니다.');
+    assertCanModifyRecord(req, before, ['created_by', 'ordered_by']);
+    const [[shipmentCount]] = await conn.execute('SELECT COUNT(*) AS cnt FROM shipments WHERE order_id = ?', [id]);
+    if (Number(shipmentCount.cnt || 0) > 0) throw badRequest('이미 출고된 주문은 직접 수정할 수 없습니다. 관리자에게 재고·출고 정정을 요청하세요.');
+
+    const customerId = body.customer_id ? toInt(body.customer_id) : before.customer_id;
+    const [customerRows] = await conn.execute("SELECT * FROM customers WHERE id = ? AND status <> 'deleted'", [customerId]);
+    if (!customerRows[0]) throw notFound('거래처를 찾을 수 없습니다.');
+    const customerSiteId = body.customer_site_id ? toInt(body.customer_site_id) : (before.customer_site_id || null);
+    let customerSite = null;
+    if (customerSiteId) {
+      const [siteRows] = await conn.execute("SELECT * FROM customer_sites WHERE id = ? AND customer_id = ? AND status <> 'deleted'", [customerSiteId, customerId]);
+      customerSite = siteRows[0];
+      if (!customerSite) throw badRequest('선택한 납품처가 거래처와 일치하지 않습니다.');
+    }
+
+    const [beforeItems] = await conn.execute('SELECT * FROM order_items WHERE order_id = ? ORDER BY id', [id]);
+    const normalizedItems = body.items ? await normalizeOrderItems(conn, body.items) : beforeItems.map((item) => ({
+      product_id: item.product_id,
+      item_name: item.item_name,
+      spec: item.spec,
+      quantity: Number(item.quantity),
+      unit_price: Number(item.unit_price),
+      amount: Number(item.amount),
+      memo: item.memo
+    }));
+    const subtotal = normalizedItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const vat = body.vat_amount !== undefined ? toMoney(body.vat_amount) : Number(before.vat_amount || 0);
+    const total = subtotal + vat;
+    const deliveryType = normalizeDeliveryType(body.delivery_type || body.delivery_method || customerSite?.default_delivery_type || before.delivery_type);
+
+    await conn.execute(
+      `UPDATE sales_orders
+          SET order_date = ?, customer_id = ?, customer_site_id = ?, source = ?, delivery_type = ?, delivery_group = ?, delivery_method = ?,
+              subtotal = ?, vat_amount = ?, total_amount = ?, memo = ?, ordered_by = ?, updated_by = ?
+        WHERE id = ?`,
+      [
+        clean(body.order_date) || dateText(before.order_date, todayKst()),
+        customerId,
+        customerSite?.id || null,
+        clean(body.source) || before.source,
+        deliveryType,
+        clean(body.delivery_group) || customerSite?.default_delivery_group || before.delivery_group || '기타',
+        clean(body.delivery_method) || deliveryType,
+        subtotal,
+        vat,
+        total,
+        body.memo !== undefined ? clean(body.memo) : before.memo,
+        body.ordered_by ? toInt(body.ordered_by) : (before.ordered_by || req.user.id),
+        req.user.id,
+        id
+      ]
+    );
+
+    if (body.items) {
+      await conn.execute('DELETE FROM order_items WHERE order_id = ?', [id]);
+      for (const item of normalizedItems) {
+        await conn.execute(
+          `INSERT INTO order_items(order_id, product_id, item_name, spec, quantity, unit_price, amount, memo)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, item.product_id, item.item_name, item.spec, item.quantity, item.unit_price, item.amount, item.memo]
+        );
+      }
+    }
+
+    const difference = total - Number(before.total_amount || 0);
+    if (before.receivable_posted && Math.abs(difference) > 0.0001) {
+      await addReceivable(conn, {
+        customer_id: customerId,
+        txn_date: clean(body.order_date) || todayKst(),
+        txn_type: 'ADJUSTMENT',
+        order_id: id,
+        customer_site_id: customerSite?.id || null,
+        delivery_type: deliveryType,
+        amount: difference,
+        memo: `주문수정 ${before.order_no}`
+      }, req);
+    }
+    const after = await getRecord(conn, 'sales_orders', id);
+    const [afterItems] = await conn.execute('SELECT * FROM order_items WHERE order_id = ? ORDER BY id', [id]);
+    await auditLog(conn, 'sales_orders', id, 'UPDATE', { ...before, items: beforeItems }, { ...after, items: afterItems }, req, body.change_reason);
+    return { order: after, items: afterItems };
+  });
+  respond(res, updated);
+}));
+
+api.delete('/orders/:id', requirePermission('orders.write'), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const reason = clean(req.body?.delete_reason);
+  if (!reason) throw badRequest('삭제 사유를 입력하세요.');
+  const deleted = await withTransaction(async (conn) => {
+    const before = await getRecord(conn, 'sales_orders', id);
+    if (!before || before.deleted_at) throw notFound('주문을 찾을 수 없습니다.');
+    assertCanModifyRecord(req, before, ['created_by', 'ordered_by']);
+    const [[shipmentCount]] = await conn.execute('SELECT COUNT(*) AS cnt FROM shipments WHERE order_id = ?', [id]);
+    if (Number(shipmentCount.cnt || 0) > 0) throw badRequest('출고 이력이 있는 주문은 삭제할 수 없습니다. 관리자에게 출고·재고 정정을 요청하세요.');
+    if (before.receivable_posted) {
+      await addReceivable(conn, {
+        customer_id: before.customer_id,
+        txn_date: todayKst(),
+        txn_type: 'ADJUSTMENT',
+        order_id: id,
+        customer_site_id: before.customer_site_id || null,
+        delivery_type: before.delivery_type || '택배',
+        amount: -Number(before.total_amount || 0),
+        memo: `주문삭제 ${before.order_no}: ${reason}`
+      }, req);
+    }
+    await conn.execute(
+      `UPDATE sales_orders
+          SET status = 'deleted', receivable_posted = 0, deleted_at = NOW(), deleted_by = ?, delete_reason = ?, updated_by = ?
+        WHERE id = ?`,
+      [req.user.id, reason, req.user.id, id]
+    );
+    const after = await getRecord(conn, 'sales_orders', id);
+    await auditLog(conn, 'sales_orders', id, 'DELETE', before, after, req, reason);
+    return after;
+  });
+  respond(res, deleted);
+}));
+
 api.put('/orders/:id/status', requirePermission('orders.write'), asyncHandler(async (req, res) => {
   const id = toInt(req.params.id);
   const status = clean(req.body.status);
@@ -1163,7 +1422,7 @@ api.post('/orders/:id/ship', requirePermission('orders.write'), asyncHandler(asy
 api.get('/payments', requirePermission('payments.read'), asyncHandler(async (req, res) => {
   const pool = await getPool();
   const params = [];
-  let where = 'WHERE 1=1';
+  let where = 'WHERE p.deleted_at IS NULL';
   const q = clean(req.query.q);
   if (q) {
     where += ' AND (p.payment_no LIKE ? OR c.name LIKE ? OR cs.site_name LIKE ? OR p.delivery_type LIKE ? OR p.method LIKE ? OR p.approval_no LIKE ?)';
@@ -1222,8 +1481,8 @@ api.post('/payments', requirePermission('payments.write'), asyncHandler(async (r
     const paymentDate = clean(req.body.payment_date) || todayKst();
     const [result] = await conn.execute(
       `INSERT INTO payments(payment_no, customer_id, customer_site_id, order_id, delivery_type, payment_date, method, amount, card_company, approval_no,
-                            bank_name, collector_user_id, memo, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                            bank_name, collector_user_id, memo, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         paymentNo,
         customerId,
@@ -1238,6 +1497,7 @@ api.post('/payments', requirePermission('payments.write'), asyncHandler(async (r
         clean(req.body.bank_name),
         req.body.collector_user_id ? toInt(req.body.collector_user_id) : req.user.id,
         clean(req.body.memo),
+        req.user.id,
         req.user.id
       ]
     );
@@ -1256,6 +1516,124 @@ api.post('/payments', requirePermission('payments.write'), asyncHandler(async (r
     return after;
   });
   respond(res, inserted, 201);
+}));
+
+api.put('/payments/:id', requirePermission('payments.write'), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const body = req.body || {};
+  const updated = await withTransaction(async (conn) => {
+    const before = await getRecord(conn, 'payments', id);
+    if (!before || before.deleted_at || before.status === 'deleted') throw notFound('수금 자료를 찾을 수 없습니다.');
+    assertCanModifyRecord(req, before, ['created_by', 'collector_user_id']);
+    const customerId = body.customer_id ? toInt(body.customer_id) : before.customer_id;
+    const [customerRows] = await conn.execute("SELECT * FROM customers WHERE id = ? AND status <> 'deleted'", [customerId]);
+    if (!customerRows[0]) throw notFound('거래처를 찾을 수 없습니다.');
+    const customerSiteId = body.customer_site_id ? toInt(body.customer_site_id) : (before.customer_site_id || null);
+    let customerSite = null;
+    if (customerSiteId) {
+      const [siteRows] = await conn.execute("SELECT * FROM customer_sites WHERE id = ? AND customer_id = ? AND status <> 'deleted'", [customerSiteId, customerId]);
+      customerSite = siteRows[0];
+      if (!customerSite) throw badRequest('선택한 납품처가 거래처와 일치하지 않습니다.');
+    }
+    const amount = body.amount !== undefined ? toMoney(body.amount) : Number(before.amount || 0);
+    if (amount <= 0) throw badRequest('수금액은 0보다 커야 합니다.');
+    const deliveryType = normalizeDeliveryType(body.delivery_type || customerSite?.default_delivery_type || before.delivery_type);
+    const paymentDate = clean(body.payment_date) || dateText(before.payment_date, todayKst());
+    await conn.execute(
+      `UPDATE payments
+          SET customer_id = ?, customer_site_id = ?, order_id = ?, delivery_type = ?, payment_date = ?, method = ?, amount = ?,
+              card_company = ?, approval_no = ?, bank_name = ?, collector_user_id = ?, memo = ?, updated_by = ?
+        WHERE id = ?`,
+      [
+        customerId,
+        customerSite?.id || null,
+        body.order_id ? toInt(body.order_id) : (before.order_id || null),
+        deliveryType,
+        paymentDate,
+        clean(body.method) || before.method,
+        amount,
+        body.card_company !== undefined ? clean(body.card_company) : before.card_company,
+        body.approval_no !== undefined ? clean(body.approval_no) : before.approval_no,
+        body.bank_name !== undefined ? clean(body.bank_name) : before.bank_name,
+        body.collector_user_id ? toInt(body.collector_user_id) : (before.collector_user_id || req.user.id),
+        body.memo !== undefined ? clean(body.memo) : before.memo,
+        req.user.id,
+        id
+      ]
+    );
+    const adjustment = Number(before.amount || 0) - amount;
+    const changedGrouping = Number(before.customer_id) !== Number(customerId)
+      || Number(before.customer_site_id || 0) !== Number(customerSite?.id || 0)
+      || String(before.delivery_type || '') !== String(deliveryType || '');
+    if (changedGrouping) {
+      await addReceivable(conn, {
+        customer_id: before.customer_id,
+        txn_date: paymentDate,
+        txn_type: 'ADJUSTMENT',
+        payment_id: id,
+        customer_site_id: before.customer_site_id || null,
+        delivery_type: before.delivery_type || '택배',
+        amount: Number(before.amount || 0),
+        memo: `수금수정 원거래 복원 ${before.payment_no}`
+      }, req);
+      await addReceivable(conn, {
+        customer_id: customerId,
+        txn_date: paymentDate,
+        txn_type: 'ADJUSTMENT',
+        payment_id: id,
+        customer_site_id: customerSite?.id || null,
+        delivery_type: deliveryType,
+        amount: -amount,
+        memo: `수금수정 신규반영 ${before.payment_no}`
+      }, req);
+    } else if (Math.abs(adjustment) > 0.0001) {
+      await addReceivable(conn, {
+        customer_id: customerId,
+        txn_date: paymentDate,
+        txn_type: 'ADJUSTMENT',
+        payment_id: id,
+        customer_site_id: customerSite?.id || null,
+        delivery_type: deliveryType,
+        amount: adjustment,
+        memo: `수금수정 ${before.payment_no}`
+      }, req);
+    }
+    const after = await getRecord(conn, 'payments', id);
+    await auditLog(conn, 'payments', id, 'UPDATE', before, after, req, body.change_reason);
+    return after;
+  });
+  respond(res, updated);
+}));
+
+api.delete('/payments/:id', requirePermission('payments.write'), asyncHandler(async (req, res) => {
+  const id = toInt(req.params.id);
+  const reason = clean(req.body?.delete_reason);
+  if (!reason) throw badRequest('삭제 사유를 입력하세요.');
+  const deleted = await withTransaction(async (conn) => {
+    const before = await getRecord(conn, 'payments', id);
+    if (!before || before.deleted_at || before.status === 'deleted') throw notFound('수금 자료를 찾을 수 없습니다.');
+    assertCanModifyRecord(req, before, ['created_by', 'collector_user_id']);
+    await addReceivable(conn, {
+      customer_id: before.customer_id,
+      txn_date: todayKst(),
+      txn_type: 'ADJUSTMENT',
+      payment_id: id,
+      customer_site_id: before.customer_site_id || null,
+      delivery_type: before.delivery_type || '택배',
+      amount: Number(before.amount || 0),
+      memo: `수금삭제 ${before.payment_no}: ${reason}`
+    }, req);
+    await conn.execute(
+      `UPDATE payments
+          SET status = 'deleted', deleted_at = NOW(), deleted_by = ?, delete_reason = ?, updated_by = ?
+        WHERE id = ?`,
+      [req.user.id, reason, req.user.id, id]
+    );
+    const after = await getRecord(conn, 'payments', id);
+    await auditLog(conn, 'payments', id, 'DELETE', before, after, req, reason);
+    return after;
+  });
+  respond(res, deleted);
 }));
 
 api.get('/production-recommendations', requirePermission('production.read'), asyncHandler(async (req, res) => {
