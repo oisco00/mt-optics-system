@@ -3,6 +3,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const path = require('path');
 const { initDb, closeDb, getPool, withTransaction, permissions: permissionSeed } = require('./db');
 const { importExcelBuffer } = require('./excelImport');
 
@@ -10,12 +11,13 @@ const app = express();
 const api = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-long-random-secret';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
-const MAX_EXCEL_FILE_MB = Math.max(Number(process.env.MAX_EXCEL_FILE_MB || 20), 1);
+// MT_OPTICS_UPLOAD_FIX_V152
+const MAX_EXCEL_FILE_MB = Math.max(Number(process.env.MAX_EXCEL_FILE_MB || 100), 1);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_EXCEL_FILE_MB * 1024 * 1024, files: 10, fields: 20, parts: 30, fieldNestingDepth: 4 },
   fileFilter: (req, file, cb) => {
-    const allowed = /\.(xls|xlsx)$/i.test(file.originalname || '');
+    const allowed = /\.(xls|xlsx)$/i.test(normalizeUploadedFileName(file.originalname));
     cb(allowed ? null : badRequest('엑셀 파일(.xls, .xlsx)만 업로드할 수 있습니다.'), allowed);
   }
 });
@@ -137,6 +139,18 @@ function clean(value) {
   if (value === undefined || value === null) return null;
   const trimmed = String(value).trim();
   return trimmed === '' ? null : trimmed;
+}
+
+/** multipart 업로드 과정에서 latin1로 잘못 해석된 한글 파일명을 UTF-8로 복구합니다. */
+function normalizeUploadedFileName(value) {
+  const raw = path.basename(String(value || 'upload.xlsx').replace(/\0/g, '')).normalize('NFC');
+  if (!raw) return 'upload.xlsx';
+  if (/[\uAC00-\uD7A3]/.test(raw)) return raw;
+  if (/[\u0080-\u00FF]/.test(raw)) {
+    const decoded = Buffer.from(raw, 'latin1').toString('utf8').normalize('NFC');
+    if (decoded && !decoded.includes('\uFFFD') && /[\uAC00-\uD7A3]/.test(decoded)) return path.basename(decoded);
+  }
+  return raw;
 }
 
 
@@ -664,7 +678,7 @@ api.get('/imports/batches', requirePermission('imports.manage'), asyncHandler(as
       ORDER BY ib.imported_at DESC, ib.id DESC
       ${limitOffsetClause(req, 100, 300)}`
   );
-  respond(res, rows);
+  respond(res, rows.map((row) => ({ ...row, file_name: normalizeUploadedFileName(row.file_name) })));
 }));
 
 api.get('/imports/batches/:id/errors', requirePermission('imports.manage'), asyncHandler(async (req, res) => {
@@ -679,11 +693,11 @@ api.post('/imports/excel', requirePermission('imports.manage'), upload.array('fi
   const results = [];
   for (const file of req.files) {
     if (!isExcelFileBuffer(file.buffer)) {
-      throw badRequest(`${file.originalname}: 파일 내용이 올바른 Excel 형식이 아닙니다.`);
+      throw badRequest(`${normalizeUploadedFileName(file.originalname)}: 파일 내용이 올바른 Excel 형식이 아닙니다.`);
     }
     const result = await importExcelBuffer(pool, {
       buffer: file.buffer,
-      fileName: file.originalname,
+      fileName: normalizeUploadedFileName(file.originalname),
       importedBy: req.user.id,
       auditUserId: req.user.id
     });
@@ -1847,14 +1861,22 @@ app.use('/api', (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  const status = err.status || 500;
-  const isServerError = status >= 500;
-  if (isServerError) console.error(err);
-  res.status(status).json({
-    ok: false,
-    error: err.message || '서버 오류가 발생했습니다.',
-    details: err.details || undefined
-  });
+  let status = err.status || 500;
+  let message = err.message || '서버 오류가 발생했습니다.';
+  let details = err.details || undefined;
+
+  if (err instanceof multer.MulterError) {
+    status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      message = `엑셀 파일은 최대 ${MAX_EXCEL_FILE_MB}MB까지 업로드할 수 있습니다.`;
+      details = { max_file_size_mb: MAX_EXCEL_FILE_MB };
+    } else {
+      message = `파일 업로드 오류: ${err.message}`;
+    }
+  }
+
+  if (status >= 500) console.error(err);
+  res.status(status).json({ ok: false, error: message, details });
 });
 
 module.exports = { app, initialize: initDb, apiRouter: api, hasPermission };
