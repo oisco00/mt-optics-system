@@ -6,6 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const { initDb, closeDb, getPool, withTransaction, permissions: permissionSeed } = require('./db');
 const { importExcelBuffer } = require('./excelImport');
+const { createFinalEnhancementsRouter } = require('./finalEnhancements');
 
 const app = express();
 const api = express.Router();
@@ -514,6 +515,9 @@ api.post('/auth/login', loginLimiter, asyncHandler(async (req, res) => {
 }));
 
 api.use(authRequired);
+
+// MT_OPTICS_FINAL_BACKEND_V200
+api.use('/final', createFinalEnhancementsRouter());
 
 api.get('/auth/me', asyncHandler(async (req, res) => {
   respond(res, publicUser(req.user));

@@ -1,0 +1,77 @@
+MT옵틱스 최종 기능 보완 v2.0
+
+적용 대상
+- 실제 GitHub Desktop 작업 폴더
+- 예: B:\No_Code(Low_Code)\mt-optics-system
+
+주요 보완사항
+
+1. 거래처/원장
+- 메뉴 선택 시 전체 거래처를 가나다순으로 표시
+- 검색어 입력 즉시 포함 검색
+- 거래처 코드 열을 숨기고 화면용 No. 일련번호 표시
+- 거래처 등록 후 등록한 이름으로 자동 검색
+- 등록한 행 자동 강조 및 가운데 스크롤
+- 원장 및 납품처 관리 유지
+- 전체·택배·영업방문 미수금 요약
+
+2. 주문/출고
+- 기간 시작/종료, 거래처, 발송구분, 상태, 일반검색을 각각 제공
+- 모든 조건에 전체 선택 제공
+- 거래처명 포함 검색 자동완성
+- 거래처 미선택 시 납품처 목록을 비움
+- 미출고 수량과 미출고 주문 수 표시
+- 주문별 미출고 전량 출고
+- 주문이 없는 출고를 위한 주문등록+즉시출고
+- 조회조건 초기화 및 금액·건수 요약
+
+3. 수금/미수금
+- 거래처명 포함 검색 자동완성
+- 거래처·납품처·발송구분 조건을 미수금과 최근 수금에 동시 적용
+- 발송구분별 미수금 체크박스
+- 동일 거래처 선택 합계 자동계산
+- 선택합계를 수금등록 폼에 자동 반영
+- 최근 1개월을 기본으로 최근 날짜 역순 표시
+- 한글 깨짐 표시 보정
+- 기존 DB의 복구 가능한 깨진 한글 일괄 복구 버튼
+
+4. 추가 편의기능
+- 검색 결과 건수와 금액 요약
+- 스크롤 테이블과 고정 헤더
+- 수정/삭제 감사이력 유지
+- 주문+출고를 하나의 트랜잭션으로 처리
+- 모바일 대응 레이아웃
+
+PC 적용
+1. ZIP 내용을 실제 GitHub 작업 폴더 최상위에 압축 해제합니다.
+2. APPLY_FINAL_ENHANCEMENTS_V200.cmd를 더블클릭합니다.
+3. SUCCESS 메시지를 확인합니다.
+4. GitHub Desktop에서 다음 파일을 확인합니다.
+   - backend/src/app.js
+   - backend/src/finalEnhancements.js
+   - frontend/app.js
+   - frontend/final-enhancements-v200.js
+   - tools/apply-final-enhancements-v200.js
+5. Commit to main 후 Push origin 합니다.
+
+권장 커밋 메시지
+Apply MT Optics final enhancements v2.0
+
+AWS 적용
+cd /var/www/mt-optics
+bash deploy/github_update
+
+브라우저
+Ctrl + F5
+
+적용 확인
+backend/src/app.js:
+  MT_OPTICS_FINAL_BACKEND_V200
+
+frontend/app.js:
+  MT_OPTICS_FINAL_FEATURES_LOADER_V200
+
+주의
+- 실제 Excel과 .env 파일은 GitHub에 올리지 마세요.
+- 최초 적용 후 수금/미수금 메뉴의 '한글 깨짐 복구'는 관리자 또는 수금쓰기 권한 사용자가 실행합니다.
+- 복구 불가능한 대체문자(�)가 이미 저장된 일부 문자열은 원본 Excel을 다시 업로드해야 할 수 있습니다.
