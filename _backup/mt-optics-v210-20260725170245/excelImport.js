@@ -1,11 +1,10 @@
 const crypto = require('crypto');
 const path = require('path');
 const XLSX = require('xlsx');
-const { normalizeUploadedFileName, repairMojibake } = require('./textEncoding');
 
 function clean(value) {
   if (value === undefined || value === null) return null;
-  const s = repairMojibake(String(value)).replace(/\u00a0/g, ' ').trim();
+  const s = String(value).replace(/\u00a0/g, ' ').trim();
   if (!s || /^합\s*계/.test(s) || /^합계/.test(s)) return null;
   return s;
 }
@@ -408,7 +407,7 @@ async function importLedgerRow(conn, batchId, fileName, item, userId, counters) 
     const [paymentResult] = await conn.execute(
       `INSERT INTO payments(payment_no, customer_id, customer_site_id, delivery_type, payment_date, method, amount, memo, created_by)
        VALUES (?, ?, ?, ?, ?, 'bank', ?, ?, ?)`,
-      [paymentNo, customer.id, site?.id || null, deliveryType, date, paymentAmount, `엑셀 업로드 수금 · ${item.rowNo}행`, userId || null]
+      [paymentNo, customer.id, site?.id || null, deliveryType, date, paymentAmount, `엑셀 수금 ${fileName} ${item.rowNo}행`, userId || null]
     );
     await insertReceivable(conn, customer.id, date, 'payment', -paymentAmount, { payment_id: paymentResult.insertId, customer_site_id: site?.id || null, delivery_type: deliveryType }, `엑셀 수금 ${paymentNo}`, userId);
     await markImported(conn, rowHash, batchId, 'payments', paymentResult.insertId);
@@ -536,13 +535,7 @@ async function processItem(conn, batchId, fileName, item, userId, counters) {
 }
 
 async function importExcelBuffer(pool, { buffer, fileName, importedBy }) {
-  fileName = normalizeUploadedFileName(fileName);
-  const workbook = XLSX.read(buffer, {
-    type: 'buffer',
-    cellDates: false,
-    raw: false,
-    codepage: /\.xls$/i.test(fileName) ? 949 : undefined
-  });
+  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, raw: false });
   workbook.__fileName = fileName;
   const items = sheetRows(workbook);
   const fileType = items[0]?.type || detectFileType(fileName, {});

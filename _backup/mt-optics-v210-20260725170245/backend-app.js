@@ -6,8 +6,6 @@ const multer = require('multer');
 const path = require('path');
 const { initDb, closeDb, getPool, withTransaction, permissions: permissionSeed } = require('./db');
 const { importExcelBuffer } = require('./excelImport');
-const { normalizeUploadedFileName: normalizeUploadedFileNameV211 } = require('./textEncoding');
-
 const { createFinalEnhancementsRouter } = require('./finalEnhancements');
 
 const app = express();
@@ -156,6 +154,7 @@ function normalizeUploadedFileName(value) {
   return raw;
 }
 
+
 function isExcelFileBuffer(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length < 4) return false;
   const isZip = buffer[0] === 0x50 && buffer[1] === 0x4b;
@@ -290,6 +289,7 @@ function pick(body, allowed) {
   return result;
 }
 
+
 function normalizeDeliveryType(value, defaultValue = '택배') {
   const raw = clean(value);
   if (!raw) return defaultValue;
@@ -361,6 +361,7 @@ function normalizeProductPayload(body) {
   }
   return data;
 }
+
 
 function normalizeCodeGroupPayload(body) {
   const data = pick(body, ['group_code', 'group_name', 'description', 'sort_order', 'is_active']);
@@ -515,7 +516,7 @@ api.post('/auth/login', loginLimiter, asyncHandler(async (req, res) => {
 
 api.use(authRequired);
 
-// MT_OPTICS_FINAL_BACKEND_V211
+// MT_OPTICS_FINAL_BACKEND_V200
 api.use('/final', createFinalEnhancementsRouter());
 
 api.get('/auth/me', asyncHandler(async (req, res) => {
@@ -543,6 +544,7 @@ api.get('/meta', asyncHandler(async (req, res) => {
   const [roles] = await pool.query('SELECT id, name, label, description FROM roles ORDER BY id');
   respond(res, { roles, permissions: permissionSeed.map(([code, label, module]) => ({ code, label, module })) });
 }));
+
 
 api.get('/code-groups', requirePermission('masters.read'), asyncHandler(async (req, res) => {
   const pool = await getPool();
@@ -699,7 +701,7 @@ api.post('/imports/excel', requirePermission('imports.manage'), upload.array('fi
     }
     const result = await importExcelBuffer(pool, {
       buffer: file.buffer,
-      fileName: normalizeUploadedFileNameV211(file.originalname),
+      fileName: normalizeUploadedFileName(file.originalname),
       importedBy: req.user.id,
       auditUserId: req.user.id
     });
@@ -862,6 +864,7 @@ api.put('/customers/:id', requirePermission('customers.write'), asyncHandler(asy
   });
   respond(res, updated);
 }));
+
 
 api.get('/customer-sites', requirePermission('customers.read'), asyncHandler(async (req, res) => {
   const pool = await getPool();

@@ -1,5 +1,11 @@
 const express = require('express');
 const { getPool, withTransaction } = require('./db');
+const {
+  repairMojibake,
+  normalizeUploadedFileName,
+  normalizeImportedPaymentMemo,
+  paymentDisplayNote
+} = require('./textEncoding');
 
 function createFinalEnhancementsRouter() {
   const router = express.Router();
@@ -71,62 +77,6 @@ function createFinalEnhancementsRouter() {
 
   function send(res, data, status = 200) {
     return res.status(status).json({ ok: true, data });
-  }
-
-  function cp1252Byte(character) {
-    const map = new Map([
-      ['€', 0x80], ['‚', 0x82], ['ƒ', 0x83], ['„', 0x84],
-      ['…', 0x85], ['†', 0x86], ['‡', 0x87], ['ˆ', 0x88],
-      ['‰', 0x89], ['Š', 0x8A], ['‹', 0x8B], ['Œ', 0x8C],
-      ['Ž', 0x8E], ['‘', 0x91], ['’', 0x92], ['“', 0x93],
-      ['”', 0x94], ['•', 0x95], ['–', 0x96], ['—', 0x97],
-      ['˜', 0x98], ['™', 0x99], ['š', 0x9A], ['›', 0x9B],
-      ['œ', 0x9C], ['ž', 0x9E], ['Ÿ', 0x9F]
-    ]);
-    return map.get(character);
-  }
-
-  function textScore(value) {
-    const text = String(value || '');
-    const hangul = (text.match(/[가-힣]/g) || []).length;
-    const replacement = (text.match(/�/g) || []).length;
-    const suspicious = (
-      text.match(/[ÃÂâêëìíîïðñòóôõöøùúûüýþæç]/gi) || []
-    ).length;
-    return hangul * 5 - replacement * 20 - suspicious * 2;
-  }
-
-  function decodeMojibakeOnce(value) {
-    const text = String(value || '');
-    if (!/[ÃÂâêëìíîïðñòóôõöøùúûüýþæçžœš]/i.test(text)) {
-      return text;
-    }
-
-    const bytes = [];
-    for (const character of text) {
-      const code = character.charCodeAt(0);
-      if (code <= 255) {
-        bytes.push(code);
-        continue;
-      }
-      const mapped = cp1252Byte(character);
-      if (mapped === undefined) return text;
-      bytes.push(mapped);
-    }
-
-    const decoded = Buffer.from(bytes).toString('utf8');
-    if (decoded.includes('�')) return text;
-    return textScore(decoded) > textScore(text) ? decoded : text;
-  }
-
-  function repairMojibake(value) {
-    let current = String(value ?? '');
-    for (let index = 0; index < 2; index += 1) {
-      const decoded = decodeMojibakeOnce(current);
-      if (decoded === current) break;
-      current = decoded;
-    }
-    return current;
   }
 
   async function getRecord(conn, tableName, id) {
@@ -446,6 +396,25 @@ function createFinalEnhancementsRouter() {
       const siteId = toInt(req.query.site_id, 0);
       const deliveryType = clean(req.query.delivery_type);
       const includeZero = String(req.query.include_zero || '') === '1';
+      const requireFilter = String(req.query.require_filter || '') === '1';
+      const groupMode = clean(req.query.group) || 'customer';
+      const limit = Math.min(
+        Math.max(toInt(req.query.limit, groupMode === 'detail' ? 2000 : 1000), 1),
+        5000
+      );
+
+      // Do not load every outstanding row on initial page entry. This prevents
+      // a long wait when the customer master and transaction history are large.
+      if (
+        requireFilter &&
+        !customerId &&
+        !customerQ &&
+        !siteId &&
+        !deliveryType
+      ) {
+        send(res, []);
+        return;
+      }
 
       if (customerId) {
         conditions.push('customer_id = ?');
@@ -469,14 +438,53 @@ function createFinalEnhancementsRouter() {
         conditions.push('receivable_balance <> 0');
       }
 
+      if (groupMode === 'detail') {
+        const [rows] = await pool.execute(
+          `SELECT *
+             FROM v_customer_receivable_by_delivery_type
+            WHERE ${conditions.join(' AND ')}
+            ORDER BY customer_name ASC, site_name ASC,
+                     FIELD(delivery_type, '택배', '영업방문', '기타'),
+                     delivery_type ASC
+            LIMIT ${limit}`,
+          params
+        );
+        send(res, rows);
+        return;
+      }
+
+      // One row per customer and dispatch type. A payment can therefore be
+      // applied directly without redundant left-side checkboxes.
       const [rows] = await pool.execute(
-        `SELECT *
-           FROM v_customer_receivable_by_delivery_type
-          WHERE ${conditions.join(' AND ')}
-          ORDER BY customer_name ASC, site_name ASC,
-                   FIELD(delivery_type, '택배', '영업방문', '기타'),
-                   delivery_type ASC
-          LIMIT 10000`,
+        `SELECT
+            customer_id,
+            MAX(customer_name) AS customer_name,
+            CASE
+              WHEN COUNT(DISTINCT COALESCE(customer_site_id, 0)) = 1
+              THEN MAX(customer_site_id)
+              ELSE NULL
+            END AS customer_site_id,
+            CASE
+              WHEN COUNT(DISTINCT COALESCE(customer_site_id, 0)) = 1
+              THEN COALESCE(MAX(NULLIF(site_name, '')), '기본')
+              ELSE CONCAT(
+                COUNT(DISTINCT COALESCE(customer_site_id, 0)),
+                '곳'
+              )
+            END AS site_name,
+            COUNT(DISTINCT COALESCE(customer_site_id, 0)) AS site_count,
+            delivery_type,
+            COALESCE(SUM(sales_amount), 0) AS sales_amount,
+            COALESCE(SUM(payment_amount), 0) AS payment_amount,
+            COALESCE(SUM(receivable_balance), 0) AS receivable_balance,
+            COUNT(*) AS detail_count
+         FROM v_customer_receivable_by_delivery_type
+        WHERE ${conditions.join(' AND ')}
+        GROUP BY customer_id, delivery_type
+        ORDER BY MAX(customer_name) ASC,
+                 FIELD(delivery_type, '택배', '영업방문', '기타'),
+                 delivery_type ASC
+        LIMIT ${limit}`,
         params
       );
 
@@ -498,6 +506,10 @@ function createFinalEnhancementsRouter() {
       const deliveryType = clean(req.query.delivery_type);
       const dateFrom = clean(req.query.date_from) || oneMonthAgoKst();
       const dateTo = clean(req.query.date_to) || todayKst();
+      const limit = Math.min(
+        Math.max(toInt(req.query.limit, 500), 1),
+        2000
+      );
 
       if (customerId) {
         conditions.push('p.customer_id = ?');
@@ -534,19 +546,27 @@ function createFinalEnhancementsRouter() {
          LEFT JOIN customer_sites cs ON cs.id = p.customer_site_id
          LEFT JOIN users u ON u.id = p.collector_user_id
         WHERE ${conditions.join(' AND ')}
-        ORDER BY p.payment_date DESC, c.name ASC,
-                 p.delivery_type ASC, cs.site_name ASC, p.id DESC
-        LIMIT 5000`,
+        ORDER BY p.payment_date DESC, p.id DESC
+        LIMIT ${limit}`,
         params
       );
 
       send(
         res,
-        rows.map((row) => ({
-          ...row,
-          memo: repairMojibake(row.memo),
-          approval_no: repairMojibake(row.approval_no)
-        }))
+        rows.map((row) => {
+          const memo = repairMojibake(row.memo);
+          const approvalNo = repairMojibake(row.approval_no);
+          return {
+            ...row,
+            memo,
+            approval_no: approvalNo,
+            display_note: paymentDisplayNote({
+              paymentNo: row.payment_no,
+              approvalNo,
+              memo
+            })
+          };
+        })
       );
     })
   );
@@ -905,54 +925,97 @@ function createFinalEnhancementsRouter() {
     '/repair-mojibake',
     requirePermission('payments.write'),
     asyncRoute(async (req, res) => {
-      const pool = await getPool();
-      const targets = [
-        ['payments', 'memo'],
-        ['payments', 'approval_no'],
-        ['receivable_transactions', 'memo'],
-        ['import_batches', 'file_name'],
-        ['sales_orders', 'memo'],
-        ['audit_logs', 'change_reason']
-      ];
+      const result = await withTransaction(async (conn) => {
+        const targets = [
+          ['payments', 'memo'],
+          ['payments', 'approval_no'],
+          ['receivable_transactions', 'memo'],
+          ['import_batches', 'file_name'],
+          ['sales_orders', 'memo'],
+          ['customers', 'memo'],
+          ['customer_sites', 'memo'],
+          ['products', 'memo'],
+          ['audit_logs', 'change_reason']
+        ];
 
-      let scanned = 0;
-      let updated = 0;
-      const details = [];
+        let scanned = 0;
+        let updated = 0;
+        const details = [];
 
-      for (const [tableName, columnName] of targets) {
-        const [rows] = await pool.query(
-          `SELECT id, ${columnName} AS value
-             FROM ${tableName}
-            WHERE ${columnName} IS NOT NULL
-              AND ${columnName} <> ''
-            LIMIT 30000`
+        for (const [tableName, columnName] of targets) {
+          const [rows] = await conn.query(
+            `SELECT id, ${columnName} AS value
+               FROM ${tableName}
+              WHERE ${columnName} IS NOT NULL
+                AND ${columnName} <> ''
+              LIMIT 50000`
+          );
+
+          let tableUpdated = 0;
+          for (const row of rows) {
+            scanned += 1;
+            const repaired = tableName === 'import_batches'
+              ? normalizeUploadedFileName(row.value)
+              : repairMojibake(row.value);
+            if (repaired !== String(row.value)) {
+              await conn.execute(
+                `UPDATE ${tableName}
+                    SET ${columnName} = ?
+                  WHERE id = ?`,
+                [repaired, row.id]
+              );
+              updated += 1;
+              tableUpdated += 1;
+            }
+          }
+
+          details.push({
+            table: tableName,
+            column: columnName,
+            scanned: rows.length,
+            updated: tableUpdated
+          });
+        }
+
+        // Imported payment memos do not need to expose a file name in the
+        // day-to-day payment list. Standardizing them also removes characters
+        // that were already replaced and can no longer be decoded.
+        const [importedPayments] = await conn.query(
+          `SELECT id, payment_no, memo
+             FROM payments
+            WHERE deleted_at IS NULL
+              AND payment_no LIKE 'PAY-IMP-%'
+            LIMIT 50000`
         );
 
-        let tableUpdated = 0;
-        for (const row of rows) {
+        let normalizedPayments = 0;
+        for (const row of importedPayments) {
           scanned += 1;
-          const repaired = repairMojibake(row.value);
-          if (repaired !== String(row.value)) {
-            await pool.execute(
-              `UPDATE ${tableName}
-                  SET ${columnName} = ?
-                WHERE id = ?`,
-              [repaired, row.id]
+          const normalized = normalizeImportedPaymentMemo({
+            paymentNo: row.payment_no,
+            memo: row.memo
+          });
+          if (normalized !== String(row.memo || '')) {
+            await conn.execute(
+              'UPDATE payments SET memo = ? WHERE id = ?',
+              [normalized, row.id]
             );
             updated += 1;
-            tableUpdated += 1;
+            normalizedPayments += 1;
           }
         }
 
         details.push({
-          table: tableName,
-          column: columnName,
-          scanned: rows.length,
-          updated: tableUpdated
+          table: 'payments',
+          column: 'imported_memo',
+          scanned: importedPayments.length,
+          updated: normalizedPayments
         });
-      }
 
-      send(res, { scanned, updated, details });
+        return { scanned, updated, details };
+      });
+
+      send(res, result);
     })
   );
 

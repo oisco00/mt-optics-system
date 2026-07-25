@@ -1,0 +1,26 @@
+MT옵틱스 v2.1.1 복구 안내
+
+1. 오류 의미
+backend/src/app.js 안에 normalizeUploadedFileName 이름이 두 번 선언되어
+Node.js가 서버 코드를 읽지 못한 상태입니다. 데이터베이스나 엑셀 원본이 손상된 것은 아닙니다.
+
+2. 복구 방법
+- 현재 검은 창에서 아무 키나 눌러 닫기
+- ZIP을 B:\No_Code(Low_Code)\mt-optics-system에 압축 해제
+- 파일 합치기 및 덮어쓰기 허용
+- APPLY_MT_OPTICS_ENHANCEMENTS_V211.cmd 실행
+
+3. 정상 완료 문구
+SUCCESS: v2.1.1 복구 및 전체 구문 점검이 완료되었습니다.
+
+4. 완료 후
+- GitHub Desktop에서 변경 파일 확인
+- 권장 커밋 메시지: Fix duplicate upload filename declaration v2.1.1
+- Commit to main → Push origin
+- AWS 자동 업데이트 실행
+- 브라우저 Ctrl+F5
+
+5. 안전조치
+- 기존 v2.1 CMD를 다시 실행하지 않기
+- 실패 상태에서는 GitHub Commit/Push를 하지 않기
+- 자동 백업 위치: _backup\mt-optics-v211-날짜시간\
