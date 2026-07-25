@@ -1,11 +1,9 @@
-// MT_OPTICS_UPLOAD_UI_FIX_V156
+// MT_OPTICS_UPLOAD_UI_FIX_V157
 (() => {
   const originalFetch = window.fetch.bind(window);
   const IMPORT_URL_PART = '/imports/excel';
-  const COOLDOWN_MS = 3500;
-  const SUCCESS_NOTICE_MS = 9000;
 
-  let state = 'idle'; // idle | uploading | cooldown
+  let state = 'idle'; // idle | uploading | waiting_confirm
   let timer = null;
   let elapsedSeconds = 0;
   let observer = null;
@@ -29,14 +27,15 @@
       .replaceAll("'", '&#039;');
   }
 
-  function formatNumber(value) {
+  function numberText(value) {
     return Number(value || 0).toLocaleString('ko-KR');
   }
 
-  function setCurrentFormLocked(message) {
+  function lockCurrentForm(buttonText) {
     const { form, fileInput, submitButton } = getElements();
+    const locked = state !== 'idle';
 
-    if (form) form.dataset.submitting = state === 'idle' ? '0' : '1';
+    if (form) form.dataset.submitting = locked ? '1' : '0';
 
     if (submitButton) {
       if (!submitButton.dataset.originalText) {
@@ -44,25 +43,19 @@
           submitButton.textContent || '선택한 엑셀 등록';
       }
 
-      submitButton.disabled = state !== 'idle';
-      submitButton.setAttribute(
-        'aria-busy',
-        state === 'idle' ? 'false' : 'true'
-      );
-      submitButton.textContent =
-        state === 'idle'
-          ? submitButton.dataset.originalText
-          : message;
-      submitButton.style.cursor = state === 'idle' ? '' : 'wait';
-      submitButton.style.opacity = state === 'idle' ? '' : '0.65';
+      submitButton.disabled = locked;
+      submitButton.setAttribute('aria-busy', locked ? 'true' : 'false');
+      submitButton.textContent = locked
+        ? buttonText
+        : submitButton.dataset.originalText;
+      submitButton.style.cursor = locked ? 'wait' : '';
+      submitButton.style.opacity = locked ? '0.65' : '';
     }
 
-    if (fileInput) fileInput.disabled = state !== 'idle';
+    if (fileInput) fileInput.disabled = locked;
 
-    document.documentElement.style.cursor =
-      state === 'idle' ? '' : 'wait';
-    document.body.style.cursor =
-      state === 'idle' ? '' : 'wait';
+    document.documentElement.style.cursor = locked ? 'wait' : '';
+    document.body.style.cursor = locked ? 'wait' : '';
   }
 
   function ensureObserver() {
@@ -70,9 +63,9 @@
 
     observer = new MutationObserver(() => {
       if (state === 'uploading') {
-        setCurrentFormLocked('등록 처리 중...');
-      } else if (state === 'cooldown') {
-        setCurrentFormLocked('등록 완료 · 다음 파일 준비 중...');
+        lockCurrentForm('등록 처리 중...');
+      } else if (state === 'waiting_confirm') {
+        lockCurrentForm('등록 완료 · 확인 대기 중...');
       }
     });
 
@@ -82,65 +75,118 @@
     });
   }
 
-  function showPageProgress() {
+  function showProgress() {
     const { resultBox } = getElements();
     if (!resultBox) return;
 
     resultBox.innerHTML = `
       <div class="card"
-           data-import-progress="1"
-           style="margin-top:12px;border:1px solid #bfdbfe;background:#eff6ff">
+           data-import-progress-v157="1"
+           style="margin-top:12px;border:1px solid #bfdbfe;background:#eff6ff;padding:12px 14px">
         <strong>엑셀 자료를 등록하고 있습니다.</strong>
         <p style="margin:8px 0 0">
-          완료 안내가 표시될 때까지 버튼을 다시 누르지 마세요.
-          경과시간: <span id="import-elapsed-v156">0초</span>
+          완료 팝업이 표시될 때까지 다시 클릭하지 마세요.
+          경과시간: <span id="import-elapsed-v157">0초</span>
         </p>
       </div>
     `;
   }
 
-  function showFixedNotice(type, title, body) {
-    let notice = document.getElementById('excel-import-notice-v156');
-
-    if (!notice) {
-      notice = document.createElement('div');
-      notice.id = 'excel-import-notice-v156';
-      notice.setAttribute('role', 'status');
-      notice.setAttribute('aria-live', 'polite');
-      document.body.appendChild(notice);
-    }
-
-    const success = type === 'success';
-    notice.style.cssText = [
-      'position:fixed',
-      'right:24px',
-      'bottom:24px',
-      'z-index:99999',
-      'width:min(440px,calc(100vw - 48px))',
-      'padding:16px 18px',
-      'border-radius:12px',
-      `border:1px solid ${success ? '#86efac' : '#fecaca'}`,
-      `background:${success ? '#f0fdf4' : '#fef2f2'}`,
-      `color:${success ? '#166534' : '#991b1b'}`,
-      'box-shadow:0 10px 30px rgba(15,23,42,.22)',
-      'font-size:14px',
-      'line-height:1.55'
-    ].join(';');
-
-    notice.innerHTML = `
-      <strong style="display:block;font-size:16px;margin-bottom:5px">
-        ${escapeHtml(title)}
-      </strong>
-      <div>${body}</div>
-    `;
-
-    window.clearTimeout(notice._hideTimer);
-    notice._hideTimer = window.setTimeout(() => {
-      notice.remove();
-    }, success ? SUCCESS_NOTICE_MS : 12000);
+  function removeExistingModal() {
+    document.getElementById('excel-import-modal-v157')?.remove();
   }
 
-  function summarizeSuccess(payload) {
+  function createModal({ success, title, messageHtml, elapsed }) {
+    removeExistingModal();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'excel-import-modal-v157';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'excel-import-modal-title-v157');
+    overlay.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'z-index:100000',
+      'display:flex',
+      'align-items:center',
+      'justify-content:center',
+      'padding:24px',
+      'background:rgba(15,23,42,.52)'
+    ].join(';');
+
+    overlay.innerHTML = `
+      <div style="
+        width:min(520px,100%);
+        background:#fff;
+        border-radius:16px;
+        box-shadow:0 24px 70px rgba(15,23,42,.35);
+        overflow:hidden;
+        border:1px solid ${success ? '#86efac' : '#fecaca'};
+      ">
+        <div style="
+          padding:18px 22px;
+          background:${success ? '#f0fdf4' : '#fef2f2'};
+          color:${success ? '#166534' : '#991b1b'};
+          font-size:18px;
+          font-weight:700;
+        " id="excel-import-modal-title-v157">
+          ${escapeHtml(title)}
+        </div>
+
+        <div style="padding:20px 22px;color:#1e293b;line-height:1.65">
+          ${messageHtml}
+
+          <div style="
+            margin-top:14px;
+            padding:10px 12px;
+            border-radius:10px;
+            background:#f8fafc;
+            color:#475569;
+          ">
+            처리시간: <strong>${escapeHtml(elapsed)}초</strong>
+          </div>
+
+          <p style="margin:14px 0 0;color:#64748b">
+            확인을 누르면 처리시간과 선택 파일을 초기화하고 화면을 자동으로 새로고침합니다.
+          </p>
+        </div>
+
+        <div style="
+          padding:0 22px 20px;
+          display:flex;
+          justify-content:flex-end;
+        ">
+          <button type="button"
+                  id="excel-import-modal-ok-v157"
+                  style="
+                    min-width:110px;
+                    border:0;
+                    border-radius:10px;
+                    padding:11px 20px;
+                    background:${success ? '#16a34a' : '#dc2626'};
+                    color:#fff;
+                    font-size:15px;
+                    font-weight:700;
+                    cursor:pointer;
+                  ">
+            확인
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const okButton = document.getElementById('excel-import-modal-ok-v157');
+    okButton?.focus();
+
+    okButton?.addEventListener('click', () => {
+      resetAndReload();
+    }, { once: true });
+  }
+
+  function summarizePayload(payload) {
     const rows = Array.isArray(payload?.data)
       ? payload.data
       : Array.isArray(payload)
@@ -148,16 +194,22 @@
         : [];
 
     if (!rows.length) {
-      return '엑셀 등록이 정상적으로 완료되었습니다. 잠시 후 다음 파일을 등록할 수 있습니다.';
+      return '<p style="margin:0">엑셀 자료가 정상적으로 등록되었습니다.</p>';
     }
 
     return rows.map((row) => `
-      <div style="margin-top:5px">
-        <b>${escapeHtml(row.file_name || '엑셀 파일')}</b><br>
-        등록 ${formatNumber(row.inserted)}
-        · 수정 ${formatNumber(row.updated)}
-        · 건너뜀 ${formatNumber(row.skipped)}
-        · 오류 ${formatNumber(row.errors)}
+      <div style="
+        margin-top:8px;
+        padding:10px 12px;
+        border:1px solid #dcfce7;
+        border-radius:10px;
+        background:#f7fee7;
+      ">
+        <strong>${escapeHtml(row.file_name || '엑셀 파일')}</strong><br>
+        등록 ${numberText(row.inserted)}
+        · 수정 ${numberText(row.updated)}
+        · 건너뜀 ${numberText(row.skipped)}
+        · 오류 ${numberText(row.errors)}
       </div>
     `).join('');
   }
@@ -165,14 +217,15 @@
   function beginUpload() {
     state = 'uploading';
     elapsedSeconds = 0;
+
     ensureObserver();
-    setCurrentFormLocked('등록 처리 중...');
-    showPageProgress();
+    lockCurrentForm('등록 처리 중...');
+    showProgress();
 
     window.clearInterval(timer);
     timer = window.setInterval(() => {
       elapsedSeconds += 1;
-      const target = document.getElementById('import-elapsed-v156');
+      const target = document.getElementById('import-elapsed-v157');
       if (target) target.textContent = `${elapsedSeconds}초`;
     }, 1000);
   }
@@ -180,44 +233,80 @@
   function finishSuccess(payload) {
     window.clearInterval(timer);
     timer = null;
-    state = 'cooldown';
+    state = 'waiting_confirm';
+    lockCurrentForm('등록 완료 · 확인 대기 중...');
 
-    setCurrentFormLocked('등록 완료 · 다음 파일 준비 중...');
-
-    const body = summarizeSuccess(payload);
-    showFixedNotice(
-      'success',
-      '엑셀 등록이 완료되었습니다.',
-      `${body}<div style="margin-top:8px">약 3초 후 다음 파일을 등록할 수 있습니다.</div>`
-    );
-
-    // 원래 화면이 가져오기 이력을 다시 그릴 시간을 확보하여
-    // 첫 번째 처리 완료와 두 번째 제출이 겹치지 않게 한다.
-    window.setTimeout(() => {
-      state = 'idle';
-      const { fileInput } = getElements();
-      if (fileInput) fileInput.value = '';
-      setCurrentFormLocked('');
-
-      showFixedNotice(
-        'success',
-        '다음 파일 등록 가능',
-        '화면 새로고침 없이 다음 엑셀 파일을 선택하여 등록할 수 있습니다.'
-      );
-    }, COOLDOWN_MS);
+    createModal({
+      success: true,
+      title: '엑셀 등록이 완료되었습니다.',
+      messageHtml: summarizePayload(payload),
+      elapsed: elapsedSeconds
+    });
   }
 
   function finishFailure(message) {
     window.clearInterval(timer);
     timer = null;
-    state = 'idle';
-    setCurrentFormLocked('');
+    state = 'waiting_confirm';
+    lockCurrentForm('등록 실패 · 확인 대기 중...');
 
-    showFixedNotice(
-      'error',
-      '엑셀 등록에 실패했습니다.',
-      escapeHtml(message)
-    );
+    createModal({
+      success: false,
+      title: '엑셀 등록에 실패했습니다.',
+      messageHtml: `
+        <p style="margin:0">
+          ${escapeHtml(message)}
+        </p>
+        <p style="margin:12px 0 0;color:#64748b">
+          확인을 누르면 화면을 초기화한 후 다시 시도할 수 있습니다.
+        </p>
+      `,
+      elapsed: elapsedSeconds
+    });
+  }
+
+  function resetAndReload() {
+    window.clearInterval(timer);
+    timer = null;
+    elapsedSeconds = 0;
+
+    const { form, fileInput, submitButton, resultBox } = getElements();
+
+    if (form) {
+      form.dataset.submitting = '0';
+      try {
+        form.reset();
+      } catch {
+        // Ignore reset errors and continue with page reload.
+      }
+    }
+
+    if (fileInput) {
+      fileInput.disabled = false;
+      fileInput.value = '';
+    }
+
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.setAttribute('aria-busy', 'false');
+      submitButton.textContent =
+        submitButton.dataset.originalText || '선택한 엑셀 등록';
+      submitButton.style.cursor = '';
+      submitButton.style.opacity = '';
+    }
+
+    if (resultBox) resultBox.innerHTML = '';
+
+    document.documentElement.style.cursor = '';
+    document.body.style.cursor = '';
+
+    state = 'idle';
+    removeExistingModal();
+
+    // F5로 정상화되던 현상을 프로그램에서 자동 수행합니다.
+    window.setTimeout(() => {
+      window.location.reload();
+    }, 120);
   }
 
   document.addEventListener('submit', (event) => {
@@ -226,18 +315,10 @@
     if (state !== 'idle') {
       event.preventDefault();
       event.stopImmediatePropagation();
-
-      showFixedNotice(
-        'error',
-        '등록 처리 중입니다.',
-        state === 'uploading'
-          ? '현재 파일의 등록이 완료될 때까지 기다려 주세요.'
-          : '첫 번째 등록 결과를 화면에 반영 중입니다. 잠시 후 다시 눌러 주세요.'
-      );
     }
   }, true);
 
-  window.fetch = async function mtOpticsFetch(input, init = {}) {
+  window.fetch = async function mtOpticsFetchV157(input, init = {}) {
     const url =
       typeof input === 'string'
         ? input
@@ -272,16 +353,13 @@
       }
 
       if (response.ok) {
-        // fetch가 끝났다고 즉시 버튼을 풀지 않고,
-        // 원래 app.js의 결과 처리와 목록 새로고침이 끝날 때까지 잠근다.
-        window.setTimeout(() => finishSuccess(payload), 500);
+        finishSuccess(payload);
       } else {
-        const serverMessage =
+        finishFailure(
           payload?.error ||
           payload?.message ||
-          `요청 실패: ${response.status}`;
-
-        finishFailure(serverMessage);
+          `요청 실패: ${response.status}`
+        );
       }
 
       return response;
