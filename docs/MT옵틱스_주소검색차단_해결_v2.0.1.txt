@@ -1,0 +1,46 @@
+MT옵틱스 주소검색 차단 해결 패치 v2.0.1
+
+발생 원인
+- 기존 보안정책(CSP)은 postcode.map.daum.net만 허용하고 있었습니다.
+- Kakao 우편번호 서비스의 현재 안내 주소는 postcode.map.kakao.com으로
+  이동되며, 공식 스크립트 주소도 t1.kakaocdn.net을 사용합니다.
+- 따라서 새 주소로 이동하는 우편번호 화면이 브라우저에서 차단될 수 있습니다.
+- 기존 주소검색은 별도 팝업 about:blank를 사용하여 차단 영향을 더 받았습니다.
+
+개선 내용
+1. CSP에 다음 도메인을 추가합니다.
+   - https://t1.kakaocdn.net
+   - https://postcode.map.kakao.com
+   - 기존 daum 도메인도 호환을 위해 유지
+2. 우편번호 스크립트를 공식 kakaocdn 주소로 변경합니다.
+3. 주소검색을 별도 팝업이 아닌 프로그램 내부 레이어 방식으로 변경합니다.
+4. 도로명주소와 지번주소를 함께 저장합니다.
+5. 주소 선택 후 상세주소로 자동 이동합니다.
+
+PC 적용
+1. 압축 내용을 실제 GitHub 작업 폴더 최상위에 풉니다.
+2. APPLY_ADDRESS_SEARCH_FIX_V201.cmd를 더블클릭합니다.
+3. SUCCESS 메시지를 확인합니다.
+4. GitHub Desktop에서 아래 파일을 확인합니다.
+   - backend/src/app.js
+   - frontend/index.html
+   - frontend/final-enhancements-v200.js
+   - tools/apply-address-search-fix-v201.js
+5. Commit to main → Push origin
+
+권장 커밋 메시지
+Fix Kakao address search blocked content v2.0.1
+
+AWS 적용
+cd /var/www/mt-optics
+bash deploy/github_update
+
+브라우저 적용
+Ctrl + F5
+
+정상 동작
+거래처 등록 → 주소검색
+→ 프로그램 화면 안에 주소검색 레이어 표시
+→ 주소 선택
+→ 우편번호·도로명주소·지번주소 자동 입력
+→ 상세주소 입력
