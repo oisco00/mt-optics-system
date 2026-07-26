@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -u
+
+PROJECT_DIR="${PROJECT_DIR:-/var/www/mt-optics}"
+PM2_APP="${PM2_APP:-mt-optics}"
+NGINX_LOG="${NGINX_LOG:-/var/log/nginx/error.log}"
+OUT_DIR="${PROJECT_DIR}/deploy/logs"
+STAMP="$(date '+%Y%m%d_%H%M%S')"
+OUT_FILE="${OUT_DIR}/upload_diagnose_${STAMP}.log"
+
+mkdir -p "$OUT_DIR"
+exec > >(tee -a "$OUT_FILE") 2>&1
+
+line() { printf '%s\n' "============================================================"; }
+
+line
+echo "MT Optics Excel Upload Diagnosis"
+echo "Time: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "Log : $OUT_FILE"
+line
+
+echo
+echo "[1] PM2 status"
+pm2 status || true
+
+echo
+echo "[2] PM2 restart count and memory"
+PM2_APP="$PM2_APP" pm2 jlist 2>/dev/null | node -e '
+let s="";
+process.stdin.on("data",d=>s+=d);
+process.stdin.on("end",()=>{
+  try {
+    const list=JSON.parse(s);
+    const name=process.env.PM2_APP;
+    const app=list.find(x=>x.name===name);
+    if(!app){ console.log("PM2 app not found:",name); return; }
+    console.log("name        :",app.name);
+    console.log("status      :",app.pm2_env?.status);
+    console.log("restarts    :",app.pm2_env?.restart_time);
+    console.log("unstable    :",app.pm2_env?.unstable_restarts);
+    console.log("memory MB   :",Math.round((app.monit?.memory||0)/1024/1024));
+    console.log("node args   :",app.pm2_env?.node_args || []);
+  } catch(e) { console.log("Could not parse pm2 jlist:",e.message); }
+});' || true
+
+echo
+echo "[3] Recent PM2 logs"
+pm2 logs "$PM2_APP" --lines 160 --nostream || true
+
+echo
+echo "[4] Recent Nginx errors"
+if [[ -f "$NGINX_LOG" ]]; then
+  sudo tail -n 160 "$NGINX_LOG" || true
+else
+  echo "Nginx error log not found: $NGINX_LOG"
+fi
+
+echo
+echo "[5] Kernel OOM / killed process messages"
+OOM_TEXT="$(sudo dmesg -T 2>/dev/null | grep -Ei 'out of memory|oom-killer|killed process' | tail -n 60 || true)"
+if [[ -n "$OOM_TEXT" ]]; then
+  echo "$OOM_TEXT"
+  echo
+  echo "[DIAGNOSIS] OUT OF MEMORY evidence was found."
+else
+  echo "No recent OOM message found in dmesg."
+fi
+
+echo
+echo "[6] RAM and swap"
+free -h || true
+echo
+swapon --show || true
+
+echo
+echo "[7] Disk"
+df -h "$PROJECT_DIR" /tmp || true
+
+echo
+echo "[8] Local API health"
+if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/api/health; then
+  echo
+  echo "Backend health check: OK"
+else
+  echo
+  echo "Backend health check: FAILED"
+fi
+
+echo
+echo "[9] Quick interpretation"
+if [[ -n "$OOM_TEXT" ]]; then
+  echo "- The Node/Excel process was probably killed because the 1GB server ran out of memory."
+  echo "- Do not retry the same large file repeatedly until memory handling is changed."
+elif [[ -f "$NGINX_LOG" ]] && sudo tail -n 200 "$NGINX_LOG" | grep -qi 'upstream prematurely closed connection'; then
+  echo "- Nginx reports that the Node upstream closed unexpectedly."
+  echo "- Check the PM2 log above for a crash, heap error, or process restart."
+elif [[ -f "$NGINX_LOG" ]] && sudo tail -n 200 "$NGINX_LOG" | grep -qi 'upstream timed out'; then
+  echo "- Nginx timeout evidence was found."
+  echo "- Proxy read/send timeout should be increased after reviewing the log."
+else
+  echo "- No automatic cause was confirmed."
+  echo "- Share this log file for the next repair step: $OUT_FILE"
+fi
+
+line
+echo "Diagnosis completed."
+echo "Log file: $OUT_FILE"
+line
