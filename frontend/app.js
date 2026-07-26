@@ -38,7 +38,11 @@ function escapeHtml(value) {
 }
 
 function money(value) {
-  return fmtMoney.format(Number(value || 0));
+  if (value === undefined || value === null || value === '') return '0';
+  const parsed = typeof value === 'number' ? value : Number(String(value).replace(/,/g, '').replace(/원/g, '').trim());
+  const safe = Number.isFinite(parsed) ? parsed : 0;
+  const integer = safe < 0 ? Math.ceil(safe) : Math.floor(safe);
+  return fmtMoney.format(integer);
 }
 
 function can(permission) {
@@ -937,5 +941,5 @@ const renderers = {
 // MT_OPTICS_UPLOAD_UI_LOADER_V157
 import("/excel-upload-ui-fix.js?v=157").catch(console.error);
 
-// MT_OPTICS_FINAL_FEATURES_LOADER_V301
-import("/final-enhancements-v301.js?v=301").catch(console.error);
+// MT_OPTICS_FINAL_FEATURES_LOADER_V302
+import("/final-enhancements-v303.js?v=303").catch(console.error);

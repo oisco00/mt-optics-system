@@ -83,6 +83,10 @@ function createFinalEnhancementsRouter() {
     return /^[0-9\-\s().·]+$/.test(text);
   }
 
+  function stripCustomerCodePrefix(value) {
+    return String(value || '').trim().replace(/^\s*\d{1,8}\s*[.,]\s*(?=[가-힣A-Za-z])/, '').trim();
+  }
+
   function displayName(row = {}) {
     const candidates = [
       row.display_name, row.customer_display_name, row.name, row.customer_name,
@@ -90,10 +94,11 @@ function createFinalEnhancementsRouter() {
       row.site_name, row.region
     ];
     for (const candidate of candidates) {
-      const text = clean(candidate);
+      const text = stripCustomerCodePrefix(clean(candidate));
       if (text && !badName(text)) return text;
     }
-    return clean(candidates.find(Boolean)) || '거래처명 미등록';
+    const fallback = candidates.find(Boolean);
+    return stripCustomerCodePrefix(clean(fallback)) || '거래처명 미등록';
   }
 
   function decorateCustomer(row = {}) {
@@ -247,6 +252,77 @@ function createFinalEnhancementsRouter() {
     })
   );
 
+
+  router.get(
+    '/customer-suggest',
+    requirePermission('customers.read'),
+    asyncRoute(async (req, res) => {
+      const pool = await getPool();
+      const q = clean(req.query.q);
+      const limit = Math.min(Math.max(toInt(req.query.limit, 60), 1), 100);
+      const params = [];
+      let where = "c.status <> 'deleted'";
+      let orderClause = 'ORDER BY c.name ASC, c.id ASC';
+
+      if (q) {
+        const like = `%${q}%`;
+        const prefix = `${q}%`;
+        where += ` AND (
+          c.name LIKE ? OR c.code LIKE ? OR c.region LIKE ?
+          OR EXISTS (
+            SELECT 1 FROM customer_sites csx
+             WHERE csx.customer_id = c.id
+               AND csx.status <> 'deleted'
+               AND (
+                 csx.site_name LIKE ? OR csx.original_customer_name LIKE ?
+                 OR csx.region LIKE ?
+               )
+          )
+        )`;
+        params.push(like, like, like, like, like, like);
+        orderClause = `ORDER BY
+          CASE
+            WHEN c.name = ? THEN 0
+            WHEN c.name LIKE ? THEN 1
+            WHEN c.name LIKE ? THEN 2
+            WHEN c.code = ? THEN 3
+            WHEN c.code LIKE ? THEN 4
+            WHEN EXISTS (
+              SELECT 1 FROM customer_sites cso
+               WHERE cso.customer_id = c.id
+                 AND cso.status <> 'deleted'
+                 AND (cso.original_customer_name LIKE ? OR cso.site_name LIKE ?)
+            ) THEN 5
+            ELSE 9
+          END,
+          c.name ASC,
+          c.id ASC`;
+        params.push(q, prefix, like, q, prefix, like, like);
+      }
+
+      const [rows] = await pool.execute(
+        `SELECT
+            c.*,
+            (
+              SELECT NULLIF(cs0.original_customer_name, '')
+                FROM customer_sites cs0
+               WHERE cs0.customer_id = c.id
+                 AND cs0.status <> 'deleted'
+                 AND cs0.original_customer_name IS NOT NULL
+               ORDER BY cs0.id ASC
+               LIMIT 1
+            ) AS original_customer_name
+         FROM customers c
+        WHERE ${where}
+        ${orderClause}
+        LIMIT ${limit}`,
+        params
+      );
+
+      send(res, rows.map(decorateCustomer));
+    })
+  );
+
   router.get(
     '/customers',
     requirePermission('customers.read'),
@@ -267,9 +343,21 @@ function createFinalEnhancementsRouter() {
       }
 
       const limit = Math.min(
-        Math.max(toInt(req.query.limit, q ? 1000 : 10000), 1),
+        Math.max(toInt(req.query.limit, q ? 300 : 3000), 1),
         10000
       );
+      const orderParams = [];
+      const orderCase = q ? `CASE
+            WHEN c.name = ? THEN 0
+            WHEN c.name LIKE ? THEN 1
+            WHEN c.name LIKE ? THEN 2
+            WHEN c.code = ? THEN 3
+            WHEN c.code LIKE ? THEN 4
+            ELSE 9
+          END,` : '';
+      if (q) {
+        orderParams.push(q, `${q}%`, `%${q}%`, q, `${q}%`);
+      }
 
       const [rows] = await pool.execute(
         `SELECT
@@ -313,9 +401,11 @@ function createFinalEnhancementsRouter() {
          LEFT JOIN users u ON u.id = c.sales_rep_id
          LEFT JOIN v_customer_receivable_balance v ON v.customer_id = c.id
         WHERE ${conditions.join(' AND ')}
-        ORDER BY c.name ASC, c.id ASC
+        ORDER BY
+          ${orderCase}
+          c.name ASC, c.id ASC
         LIMIT ${limit}`,
-        params
+        params.concat(orderParams)
       );
 
       send(res, rows.map(decorateCustomer));

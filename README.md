@@ -71,3 +71,7 @@ deploy/         Lightsail 업데이트·백업·롤백
 import/excel/    명령어 가져오기용 빈 폴더
 docs/           표준양식과 설명
 ```
+
+
+## APPLY_FINAL_ENHANCEMENTS_V303
+거래처 자동완성 서버 조회, 주소검색 차단 대응, 검색 인덱스 보완이 반영된 최종 안정화 버전입니다.

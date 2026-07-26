@@ -1,6 +1,6 @@
-// MT_OPTICS_FINAL_FEATURES_V301
+// MT_OPTICS_FINAL_FEATURES_V303
 (() => {
-  const VERSION = '3.0.1';
+  const VERSION = '3.0.3';
   const API_BASE = localStorage.getItem('mt_api_base') || '/api';
   const cache = {
     user: null,
@@ -60,8 +60,25 @@
     return value ? String(value).slice(0, 10) : '';
   }
 
+  function parseWonNumber(value) {
+    if (value === undefined || value === null || value === '') return 0;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const normalized = String(value).replace(/,/g, '').replace(/원/g, '').trim();
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function integerWon(value) {
+    const parsed = parseWonNumber(value);
+    return parsed < 0 ? Math.ceil(parsed) : Math.floor(parsed);
+  }
+
   function money(value) {
-    return Number(value || 0).toLocaleString('ko-KR');
+    return integerWon(value).toLocaleString('ko-KR');
+  }
+
+  function wonInputValue(value) {
+    return String(integerWon(value));
   }
 
   function escapeHtml(value) {
@@ -267,10 +284,10 @@
   }
 
   function injectStyles() {
-    if (document.getElementById('mt-final-styles-v301')) return;
+    if (document.getElementById('mt-final-styles-v303')) return;
 
     const style = document.createElement('style');
-    style.id = 'mt-final-styles-v301';
+    style.id = 'mt-final-styles-v303';
     style.textContent = `
       .mtf-root{display:grid;gap:18px}
       .mtf-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
@@ -346,6 +363,12 @@
       .mtf-postcode-box{width:min(560px,96vw);height:min(640px,86vh);background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,.28);overflow:hidden;display:flex;flex-direction:column}
       .mtf-postcode-head{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid #e2e8f0}
       .mtf-postcode-body{flex:1;min-height:0}
+
+      .mtf-ac-list{max-height:280px;overflow:auto}
+      .mtf-ac-item strong{display:block;color:#0f172a!important;font-weight:800!important;font-size:15px!important}
+      .mtf-ac-item .mtf-sub{display:block;color:#475569!important;font-weight:600!important;margin-top:3px}
+      .mtf-address-fallback{height:auto;min-height:420px;max-height:86vh}
+      .mtf-notice.compact{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;color:#334155;line-height:1.55}
       .mtf-items{display:grid;gap:8px}
       .mtf-item-row{display:grid;grid-template-columns:2.2fr 1fr .8fr 1fr auto;gap:8px;align-items:end;padding:10px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc}
       .mtf-selected-bar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:12px 14px}
@@ -594,11 +617,33 @@
     return data;
   }
 
+  const customerSuggestCache = new Map();
+
   async function loadCustomers(force = false) {
+    // 화면 최초 로딩 또는 선택 보정용 최소 캐시입니다. 1만 건 전체를 매번
+    // 브라우저에서 필터링하지 않도록 제한합니다.
     if (!cache.customers || force) {
-      cache.customers = await api('/final/customers?limit=10000');
+      cache.customers = await api('/final/customers?limit=500');
     }
     return cache.customers;
+  }
+
+  async function fetchCustomerSuggestions(keyword = '', fallbackCustomers = []) {
+    const q = String(keyword || '').trim();
+    const key = normalizeText(q);
+    if (customerSuggestCache.has(key)) return customerSuggestCache.get(key);
+
+    let rows = [];
+    try {
+      rows = await api(`/final/customer-suggest?q=${encodeURIComponent(q)}&limit=60`);
+    } catch (error) {
+      console.warn('[customer-suggest fallback]', error);
+      rows = rankCustomerMatches(fallbackCustomers, q).slice(0, 60);
+    }
+
+    customerSuggestCache.set(key, rows);
+    if (customerSuggestCache.size > 80) customerSuggestCache.delete(customerSuggestCache.keys().next().value);
+    return rows;
   }
 
   async function loadSites(force = false) {
@@ -683,6 +728,15 @@
     return /^[0-9\-\s().·]+$/.test(text);
   }
 
+  function stripCustomerCodePrefix(value) {
+    let text = String(value || '').trim();
+    // 엑셀 원장에서 가져온 "1.거래처명", "0001, 거래처명" 형태의
+    // 관리번호 접두어는 화면 표시명에서 제거합니다. 단, "1001안경"처럼
+    // 숫자가 실제 상호 일부인 경우는 유지합니다.
+    text = text.replace(/^\s*\d{1,8}\s*[.,]\s*(?=[가-힣A-Za-z])/, '');
+    return text.trim();
+  }
+
   function customerDisplayName(row = {}) {
     const candidates = [
       row.display_name,
@@ -695,11 +749,11 @@
       row.region
     ];
     for (const candidate of candidates) {
-      const text = String(candidate || '').trim();
+      const text = stripCustomerCodePrefix(candidate);
       if (text && !badCustomerName(text)) return text;
     }
     for (const candidate of candidates) {
-      const text = String(candidate || '').trim();
+      const text = stripCustomerCodePrefix(candidate);
       if (text) return text;
     }
     return '거래처명 미등록';
@@ -708,19 +762,71 @@
   function customerSubText(row = {}) {
     return [
       row.region,
+      row.code || row.customer_code,
       formatPhone(row.phone || row.customer_phone || row.site_phone || row.mobile),
       formatBusinessNo(row.business_no || row.customer_business_no)
     ].filter(Boolean).join(' · ');
   }
 
+  function customerPrimaryValues(row = {}) {
+    return [
+      customerDisplayName(row), row.name, row.customer_name, row.display_name,
+      row.customer_display_name, row.original_customer_name, row.site_original_customer_name,
+      row.site_name, row.region, row.code, row.customer_code
+    ].filter(Boolean).map(stripCustomerCodePrefix);
+  }
+
   function customerSearchValues(row = {}) {
     return [
-      customerDisplayName(row), row.display_name, row.customer_display_name,
-      row.name, row.customer_name, row.code, row.customer_code,
+      ...customerPrimaryValues(row),
       row.business_no, row.customer_business_no,
-      row.region, row.site_name, row.original_customer_name,
       row.phone, row.mobile, phoneDigits(row.phone), phoneDigits(row.mobile)
     ];
+  }
+
+  function customerMatchScore(row = {}, keyword = '') {
+    const q = normalizeText(keyword);
+    const digits = phoneDigits(keyword);
+    if (!q) return 100;
+
+    const name = normalizeText(customerDisplayName(row));
+    const code = normalizeText(row.code || row.customer_code || '');
+    const site = normalizeText(row.site_name || row.region || '');
+    const primary = customerPrimaryValues(row).map(normalizeText).filter(Boolean);
+
+    if (name === q) return 0;
+    if (name.startsWith(q)) return 10;
+    if (name.includes(q)) return 20;
+    if (code === q) return 30;
+    if (code.startsWith(q)) return 35;
+    if (code.includes(q)) return 40;
+    if (primary.some((value) => value.startsWith(q))) return 50;
+    if (primary.some((value) => value.includes(q))) return 60;
+    if (site.includes(q)) return 75;
+
+    // 전화/사업자번호는 보조 검색으로만 사용합니다. 거래처명 또는 코드가
+    // 매칭되는 자료가 있으면 프런트에서는 보조 검색 결과를 뒤로 보냅니다.
+    if (digits.length >= 5) {
+      const phone = phoneDigits(row.phone || row.mobile || row.customer_phone || row.site_phone);
+      const biz = phoneDigits(row.business_no || row.customer_business_no);
+      if (phone.startsWith(digits)) return 120;
+      if (phone.includes(digits)) return 130;
+      if (biz.includes(digits)) return 150;
+    }
+    return 999999;
+  }
+
+  function rankCustomerMatches(rows = [], keyword = '') {
+    const scored = rows
+      .map((row) => ({ row, score: customerMatchScore(row, keyword) }))
+      .filter((item) => item.score < 999999);
+    const hasPrimary = scored.some((item) => item.score < 100);
+    return scored
+      .filter((item) => !hasPrimary || item.score < 100)
+      .sort((a, b) =>
+        a.score - b.score || customerDisplayName(a.row).localeCompare(customerDisplayName(b.row), 'ko') || Number(a.row.id || 0) - Number(b.row.id || 0)
+      )
+      .map((item) => item.row);
   }
 
   function customerAutocompleteHtml({
@@ -756,50 +862,59 @@
     `;
   }
 
-  function bindCustomerAutocomplete(scope, customers, options = {}) {
+  function bindCustomerAutocomplete(scope, customers = [], options = {}) {
     scope.querySelectorAll('[data-mtf-ac]').forEach((wrapper) => {
       const input = wrapper.querySelector('[data-mtf-ac-input]');
       const hidden = wrapper.querySelector('[data-mtf-ac-value]');
       const list = wrapper.querySelector('[data-mtf-ac-list]');
       let matches = [];
       let activeIndex = -1;
+      let debounceTimer = null;
+      let requestSeq = 0;
 
       function updateActiveItem() {
         list.querySelectorAll('[data-customer-id]').forEach((button, index) => {
           button.classList.toggle('active', index === activeIndex);
-          if (index === activeIndex) {
-            button.scrollIntoView({ block: 'nearest' });
-          }
+          if (index === activeIndex) button.scrollIntoView({ block: 'nearest' });
         });
       }
 
-      function renderMatches() {
-        const keyword = normalizeText(input.value);
-        matches = customers
-          .filter((customer) => {
-            if (!keyword) return true;
-            return customerSearchValues(customer).some((value) => {
-              const normalized = normalizeText(value);
-              if (normalized.includes(keyword)) return true;
-              const digits = phoneDigits(keyword);
-              return digits && phoneDigits(value).includes(digits);
-            });
-          })
-          .sort((a, b) => customerDisplayName(a).localeCompare(customerDisplayName(b), 'ko'))
-          .slice(0, 40);
-
+      function drawMatches(keyword) {
         activeIndex = -1;
         list.innerHTML = matches.length
           ? matches.map((customer) => `
-              <button type="button" class="mtf-ac-item"
-                      data-customer-id="${customer.id}">
+              <button type="button" class="mtf-ac-item" data-customer-id="${customer.id}">
                 <strong>${escapeHtml(customerDisplayName(customer))}</strong>
                 <span class="mtf-sub">${escapeHtml(customerSubText(customer))}</span>
               </button>
             `).join('')
-          : `<div class="mtf-empty compact">일치하는 거래처가 없습니다.</div>`;
-
+          : `<div class="mtf-empty compact">${keyword ? '일치하는 거래처가 없습니다.' : '거래처명을 입력하세요.'}</div>`;
         list.hidden = false;
+      }
+
+      async function renderMatchesNow() {
+        const keyword = input.value.trim();
+        const seq = ++requestSeq;
+        list.hidden = false;
+        list.innerHTML = '<div class="mtf-empty compact">조회 중...</div>';
+        try {
+          const remoteRows = await fetchCustomerSuggestions(keyword, customers);
+          if (seq !== requestSeq) return;
+          matches = rankCustomerMatches(remoteRows, keyword).slice(0, 40);
+          // 서버가 이미 관련도 순으로 내려주지만, 프런트에서 다시 한 번
+          // 거래처명/코드 우선으로 보정합니다.
+          drawMatches(keyword);
+        } catch (error) {
+          console.warn(error);
+          if (seq !== requestSeq) return;
+          matches = rankCustomerMatches(customers, keyword).slice(0, 40);
+          drawMatches(keyword);
+        }
+      }
+
+      function scheduleMatches(delay = 160) {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(renderMatchesNow, delay);
       }
 
       function selectCustomer(customer) {
@@ -807,35 +922,31 @@
         hidden.value = customer?.id || '';
         list.hidden = true;
         activeIndex = -1;
-        wrapper.dispatchEvent(
-          new CustomEvent('mtf-customer-selected', {
-            bubbles: true,
-            detail: customer || null
-          })
-        );
+        wrapper.dispatchEvent(new CustomEvent('mtf-customer-selected', {
+          bubbles: true,
+          detail: customer || null
+        }));
       }
 
       input.addEventListener('input', () => {
         hidden.value = '';
-        renderMatches();
         options.onInput?.(input.value);
+        scheduleMatches(180);
       });
 
-      input.addEventListener('focus', renderMatches);
+      input.addEventListener('focus', () => scheduleMatches(0));
 
       input.addEventListener('keydown', (event) => {
         if (event.isComposing || event.keyCode === 229) return;
-
         if (event.key === 'ArrowDown') {
           event.preventDefault();
-          if (list.hidden) renderMatches();
+          if (list.hidden) scheduleMatches(0);
           if (matches.length) {
             activeIndex = Math.min(activeIndex + 1, matches.length - 1);
             updateActiveItem();
           }
           return;
         }
-
         if (event.key === 'ArrowUp') {
           event.preventDefault();
           if (matches.length) {
@@ -844,18 +955,13 @@
           }
           return;
         }
-
         if (event.key === 'Escape') {
           list.hidden = true;
           activeIndex = -1;
           return;
         }
-
         if (event.key === 'Enter') {
-          const exact = customers.find(
-            (customer) => normalizeText(customerDisplayName(customer)) === normalizeText(input.value)
-          );
-          const selected = matches[activeIndex] || exact || (matches.length === 1 ? matches[0] : null);
+          const selected = matches[activeIndex] || (matches.length === 1 ? matches[0] : null);
           if (selected) {
             event.preventDefault();
             event.stopPropagation();
@@ -866,14 +972,13 @@
 
       input.addEventListener('blur', () => {
         setTimeout(() => {
-          const exact = customers.find(
-            (customer) =>
-              normalizeText(customerDisplayName(customer)) === normalizeText(input.value)
+          const exact = matches.find((customer) =>
+            normalizeText(customerDisplayName(customer)) === normalizeText(input.value)
           );
           if (exact) selectCustomer(exact);
           else if (!input.value.trim()) selectCustomer(null);
           list.hidden = true;
-        }, 160);
+        }, 180);
       });
 
       list.addEventListener('mousemove', (event) => {
@@ -887,9 +992,8 @@
         const button = event.target.closest('[data-customer-id]');
         if (!button) return;
         event.preventDefault();
-        const customer = customers.find(
-          (row) => String(row.id) === button.dataset.customerId
-        );
+        const customer = matches.find((row) => String(row.id) === button.dataset.customerId)
+          || customers.find((row) => String(row.id) === button.dataset.customerId);
         selectCustomer(customer);
       });
     });
@@ -938,6 +1042,19 @@
   }
 
   let postcodeScriptPromise = null;
+
+  function isIpHost(hostname = location.hostname) {
+    return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
+  }
+
+  function shouldUseAddressFallback() {
+    // 카카오 주소검색 iframe은 일부 브라우저/보안정책에서 HTTP 또는 IP 주소
+    // 접속 환경일 때 about:blank/콘텐츠 차단으로 표시될 수 있습니다.
+    // 운영 도메인+HTTPS가 아닌 경우에는 처음부터 직접입력/새창 모드로 열어
+    // 오류 화면을 보이지 않게 합니다.
+    return location.protocol !== 'https:' || isIpHost(location.hostname);
+  }
+
   function ensurePostcodeScript() {
     if (window.daum?.Postcode) return Promise.resolve();
     if (postcodeScriptPromise) return postcodeScriptPromise;
@@ -954,7 +1071,7 @@
       script.defer = true;
       script.dataset.mtfPostcodeScript = '1';
       script.onload = resolve;
-      script.onerror = () => reject(new Error('카카오 주소검색 스크립트를 불러오지 못했습니다.'));
+      script.onerror = () => reject(new Error('주소검색 스크립트를 불러오지 못했습니다.'));
       document.head.appendChild(script);
     });
     return postcodeScriptPromise;
@@ -966,12 +1083,12 @@
 
   function fillAddressBlock(block, data) {
     if (!block || !data) return;
-    const selectedType = data.userSelectedType === 'J' ? 'J' : 'R';
-    const road = data.roadAddress || data.autoRoadAddress || '';
-    const jibun = data.jibunAddress || data.autoJibunAddress || '';
-    const selected = selectedType === 'J' ? (jibun || road) : (road || jibun);
+    const selectedType = data.userSelectedType === 'J' || data.address_type === 'J' ? 'J' : 'R';
+    const road = data.roadAddress || data.autoRoadAddress || data.road_address || '';
+    const jibun = data.jibunAddress || data.autoJibunAddress || data.jibun_address || '';
+    const selected = data.address || (selectedType === 'J' ? (jibun || road) : (road || jibun));
     const fields = {
-      postal_code: data.zonecode || '',
+      postal_code: data.zonecode || data.postal_code || '',
       road_address: road,
       jibun_address: jibun,
       address_type: selectedType,
@@ -984,20 +1101,102 @@
     block.querySelector('[name="detail_address"]')?.focus();
   }
 
+  function openManualAddressLayer(block, message = '') {
+    if (!block) return;
+    document.querySelectorAll('.mtf-postcode-layer').forEach((node) => node.remove());
+    const current = {
+      postal_code: block.querySelector('[name="postal_code"]')?.value || '',
+      address: block.querySelector('[name="address"]')?.value || '',
+      road_address: block.querySelector('[name="road_address"]')?.value || '',
+      jibun_address: block.querySelector('[name="jibun_address"]')?.value || '',
+      detail_address: block.querySelector('[name="detail_address"]')?.value || '',
+      address_type: block.querySelector('[name="address_type"]')?.value || 'R'
+    };
+    const layer = document.createElement('div');
+    layer.className = 'mtf-postcode-layer';
+    layer.innerHTML = `
+      <div class="mtf-postcode-box mtf-address-fallback">
+        <div class="mtf-postcode-head">
+          <strong>주소입력</strong>
+          <button type="button" class="mtf-btn small" data-close-postcode>닫기</button>
+        </div>
+        <div class="mtf-postcode-body" style="padding:16px;overflow:auto">
+          <div class="mtf-notice compact">
+            ${escapeHtml(message || '현재 접속 환경에서는 카카오 주소검색이 차단될 수 있어 직접입력 방식으로 전환했습니다.')}
+            <br>주소 검색 사이트를 새 창으로 열어 우편번호와 주소를 복사한 뒤 입력하세요.
+          </div>
+          <div class="mtf-form-grid" style="margin-top:14px">
+            <div class="mtf-field">
+              <label>우편번호</label>
+              <input class="mtf-input" data-manual-postal value="${escapeHtml(current.postal_code)}">
+            </div>
+            <div class="mtf-field">
+              <label>주소구분</label>
+              <select class="mtf-select" data-manual-type>
+                <option value="R" ${current.address_type === 'R' ? 'selected' : ''}>도로명주소</option>
+                <option value="J" ${current.address_type === 'J' ? 'selected' : ''}>지번주소</option>
+              </select>
+            </div>
+            <div class="mtf-field mtf-span-2">
+              <label>주소</label>
+              <input class="mtf-input" data-manual-address value="${escapeHtml(current.address)}">
+            </div>
+            <div class="mtf-field mtf-span-2">
+              <label>상세주소</label>
+              <input class="mtf-input" data-manual-detail value="${escapeHtml(current.detail_address)}">
+            </div>
+          </div>
+          <div class="mtf-actions" style="margin-top:14px;justify-content:flex-end">
+            <button type="button" class="mtf-btn" data-open-juso>주소검색 새창</button>
+            <button type="button" class="mtf-btn primary" data-apply-manual>입력값 반영</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(layer);
+    const close = () => layer.remove();
+    layer.querySelector('[data-close-postcode]').addEventListener('click', close);
+    layer.addEventListener('click', (event) => { if (event.target === layer) close(); });
+    layer.querySelector('[data-open-juso]').addEventListener('click', () => {
+      window.open('https://www.juso.go.kr/openIndexPage.do', '_blank', 'noopener,noreferrer');
+    });
+    layer.querySelector('[data-apply-manual]').addEventListener('click', () => {
+      const postal = layer.querySelector('[data-manual-postal]').value.trim();
+      const address = layer.querySelector('[data-manual-address]').value.trim();
+      const detail = layer.querySelector('[data-manual-detail]').value.trim();
+      const type = layer.querySelector('[data-manual-type]').value || 'R';
+      fillAddressBlock(block, {
+        postal_code: postal,
+        address,
+        road_address: type === 'R' ? address : current.road_address,
+        jibun_address: type === 'J' ? address : current.jibun_address,
+        address_type: type
+      });
+      const detailField = block.querySelector('[name="detail_address"]');
+      if (detailField) detailField.value = detail;
+      close();
+    });
+    setTimeout(() => layer.querySelector('[data-manual-address]')?.focus(), 50);
+  }
+
   async function openSafePostcodeLayer(button) {
     const block = findAddressBlockFromButton(button);
     if (!block) {
       showToast('주소 입력 영역을 찾지 못했습니다.', 'error');
       return;
     }
+    if (shouldUseAddressFallback()) {
+      openManualAddressLayer(block, '현재처럼 IP 주소 또는 HTTP로 접속한 경우 카카오 주소검색 창이 브라우저에서 차단될 수 있습니다.');
+      return;
+    }
     try {
       await ensurePostcodeScript();
     } catch (error) {
-      showToast(error.message || '주소검색 서비스를 불러오지 못했습니다.', 'error');
+      openManualAddressLayer(block, error.message || '주소검색 스크립트를 불러오지 못했습니다.');
       return;
     }
     if (!window.daum?.Postcode) {
-      showToast('주소검색 서비스를 불러오지 못했습니다. 인터넷 연결 또는 보안정책을 확인하세요.', 'error');
+      openManualAddressLayer(block, '주소검색 서비스를 사용할 수 없어 직접입력으로 전환했습니다.');
       return;
     }
     document.querySelectorAll('.mtf-postcode-layer').forEach((node) => node.remove());
@@ -1007,7 +1206,10 @@
       <div class="mtf-postcode-box">
         <div class="mtf-postcode-head">
           <strong>주소검색</strong>
-          <button type="button" class="mtf-btn small" data-close-postcode>닫기</button>
+          <div class="mtf-actions">
+            <button type="button" class="mtf-btn small" data-manual-address>직접입력</button>
+            <button type="button" class="mtf-btn small" data-close-postcode>닫기</button>
+          </div>
         </div>
         <div class="mtf-postcode-body"></div>
       </div>
@@ -1015,6 +1217,7 @@
     document.body.appendChild(layer);
     const close = () => layer.remove();
     layer.querySelector('[data-close-postcode]').addEventListener('click', close);
+    layer.querySelector('[data-manual-address]').addEventListener('click', () => { close(); openManualAddressLayer(block); });
     layer.addEventListener('click', (event) => { if (event.target === layer) close(); });
     try {
       new window.daum.Postcode({
@@ -1024,83 +1227,27 @@
         oncomplete(data) { fillAddressBlock(block, data); close(); },
         onclose() { close(); }
       }).embed(layer.querySelector('.mtf-postcode-body'));
+      // iframe 차단 또는 빈 화면 상황에 대비해 직접입력 버튼을 항상 제공합니다.
+      setTimeout(() => {
+        const body = layer.querySelector('.mtf-postcode-body');
+        if (body && body.childElementCount === 0) {
+          close();
+          openManualAddressLayer(block, '주소검색 화면이 열리지 않아 직접입력으로 전환했습니다.');
+        }
+      }, 1800);
     } catch (error) {
       console.error(error);
       close();
-      showToast('주소검색 창을 열지 못했습니다. 새로고침 후 다시 시도하세요.', 'error');
+      openManualAddressLayer(block, '주소검색 창을 열지 못해 직접입력으로 전환했습니다.');
     }
   }
 
   function bindAddressSearch(scope) {
-    function closeLayer(layer) {
-      layer?.remove();
-    }
-
-    function fillAddress(block, data) {
-      const selectedType = data.userSelectedType === 'J' ? 'J' : 'R';
-      const road = data.roadAddress || data.autoRoadAddress || '';
-      const jibun = data.jibunAddress || data.autoJibunAddress || '';
-      const selected = selectedType === 'J' ? (jibun || road) : (road || jibun);
-      const fields = {
-        postal_code: data.zonecode || '',
-        road_address: road,
-        jibun_address: jibun,
-        address_type: selectedType,
-        address: selected
-      };
-      for (const [name, value] of Object.entries(fields)) {
-        const element = block.querySelector(`[name="${name}"]`);
-        if (element) element.value = value;
-      }
-      block.querySelector('[name="detail_address"]')?.focus();
-    }
-
-    function openEmbeddedPostcode(block) {
-      const layer = document.createElement('div');
-      layer.className = 'mtf-postcode-layer';
-      layer.innerHTML = `
-        <div class="mtf-postcode-box">
-          <div class="mtf-postcode-head">
-            <strong>주소검색</strong>
-            <button type="button" class="mtf-btn small" data-close-postcode>닫기</button>
-          </div>
-          <div class="mtf-postcode-body"></div>
-        </div>
-      `;
-      document.body.appendChild(layer);
-      const body = layer.querySelector('.mtf-postcode-body');
-      layer.querySelector('[data-close-postcode]').addEventListener('click', () => closeLayer(layer));
-      layer.addEventListener('click', (event) => {
-        if (event.target === layer) closeLayer(layer);
-      });
-      try {
-        new window.daum.Postcode({
-          width: '100%',
-          height: '100%',
-          oncomplete(data) {
-            fillAddress(block, data);
-            closeLayer(layer);
-          },
-          onclose() {
-            closeLayer(layer);
-          }
-        }).embed(body);
-      } catch (error) {
-        closeLayer(layer);
-        console.error(error);
-        showToast('주소검색 창을 열지 못했습니다. 브라우저 새로고침 후 다시 시도하세요.', 'error');
-      }
-    }
-
     scope.querySelectorAll('[data-mtf-address-search]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const block = button.closest('[data-mtf-address-block]');
-        if (!block) return;
-        if (!window.daum?.Postcode) {
-          showToast('주소검색 서비스를 불러오지 못했습니다. 인터넷 연결 또는 보안정책을 확인하세요.', 'error');
-          return;
-        }
-        openEmbeddedPostcode(block);
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openSafePostcodeLayer(button);
       });
     });
   }
@@ -1187,7 +1334,7 @@
           <div class="mtf-field">
             <label>초기미수금</label>
             <input class="mtf-input" type="number" name="opening_receivable"
-                   value="${escapeHtml(row?.opening_receivable || 0)}">
+                   value="${escapeHtml(wonInputValue(row?.opening_receivable || 0))}">
           </div>
           <div class="mtf-field">
             <label>결제조건</label>
@@ -1389,7 +1536,7 @@
           <div class="mtf-field">
             <label>초기미수금</label>
             <input class="mtf-input" type="number" name="opening_receivable"
-                   value="${escapeHtml(row?.opening_receivable || 0)}">
+                   value="${escapeHtml(wonInputValue(row?.opening_receivable || 0))}">
           </div>
           <div class="mtf-field">
             <label>상태</label>
@@ -1445,7 +1592,7 @@
     );
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="customers-v301">
+      <div class="mtf-root" data-mtf-view="customers-v303">
         <div class="mtf-head">
           <div><h1>거래처/원장</h1></div>
           <div class="mtf-actions">
@@ -1677,7 +1824,7 @@
     );
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="orders-v301">
+      <div class="mtf-root" data-mtf-view="orders-v303">
         <div class="mtf-head">
           <div><h1>주문/출고</h1></div>
           <div class="mtf-actions">
@@ -1982,7 +2129,7 @@
         <div class="mtf-field">
           <label>단가</label>
           <input class="mtf-input" type="number" min="0" name="unit_price"
-                 value="${escapeHtml(item.unit_price || 0)}">
+                 value="${escapeHtml(wonInputValue(item.unit_price || 0))}">
         </div>
         <div class="mtf-field">
           <label>품목명</label>
@@ -2117,7 +2264,7 @@
           <div class="mtf-field">
             <label>부가세</label>
             <input class="mtf-input" type="number" name="vat_amount"
-                   value="${escapeHtml(order?.vat_amount || 0)}">
+                   value="${escapeHtml(wonInputValue(order?.vat_amount || 0))}">
           </div>
           ${orderId
             ? `
@@ -2707,7 +2854,7 @@
           <div class="mtf-field">
             <label>금액 *</label>
             <input class="mtf-input" type="number" name="amount" required
-                   value="${payment.amount}">
+                   value="${escapeHtml(wonInputValue(payment.amount))}">
           </div>
           <div class="mtf-field">
             <label>카드사/입금은행</label>
@@ -2820,7 +2967,7 @@
       : '발송구분별 미수금은 아래 별도 조건에서 거래처 또는 발송구분을 선택한 뒤 조회하세요.';
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="payments-v301">
+      <div class="mtf-root" data-mtf-view="payments-v303">
         <div class="mtf-head">
           <div><h1>수금/미수금</h1></div>
           <div class="mtf-actions"><button class="mtf-btn help" data-page-help>도움말</button></div>
@@ -3084,7 +3231,7 @@
     const el = contentElement();
     if (!el || !['customers', 'orders', 'payments'].includes(page)) return;
 
-    const marker = el.querySelector(`[data-mtf-view="${page}-v301"]`);
+    const marker = el.querySelector(`[data-mtf-view="${page}-v303"]`);
     if (marker && !force) return;
 
     try {
@@ -3146,5 +3293,5 @@
   window.addEventListener('load', () => scheduleRender(true));
   scheduleRender(true);
 
-  console.info(`MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V301 ${VERSION} 수정본 로드 완료`);
+  console.info(`MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V303 ${VERSION} 수정본 로드 완료`);
 })();
