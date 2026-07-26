@@ -1,6 +1,6 @@
-// MT_OPTICS_FINAL_FEATURES_V303
+// MT_OPTICS_FINAL_FEATURES_V304
 (() => {
-  const VERSION = '3.0.3';
+  const VERSION = '3.0.4';
   const API_BASE = localStorage.getItem('mt_api_base') || '/api';
   const cache = {
     user: null,
@@ -284,10 +284,10 @@
   }
 
   function injectStyles() {
-    if (document.getElementById('mt-final-styles-v303')) return;
+    if (document.getElementById('mt-final-styles-v304')) return;
 
     const style = document.createElement('style');
-    style.id = 'mt-final-styles-v303';
+    style.id = 'mt-final-styles-v304';
     style.textContent = `
       .mtf-root{display:grid;gap:18px}
       .mtf-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
@@ -364,11 +364,12 @@
       .mtf-postcode-head{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid #e2e8f0}
       .mtf-postcode-body{flex:1;min-height:0}
 
-      .mtf-ac-list{max-height:280px;overflow:auto}
-      .mtf-ac-item strong{display:block;color:#0f172a!important;font-weight:800!important;font-size:15px!important}
-      .mtf-ac-item .mtf-sub{display:block;color:#475569!important;font-weight:600!important;margin-top:3px}
-      .mtf-address-fallback{height:auto;min-height:420px;max-height:86vh}
-      .mtf-notice.compact{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;color:#334155;line-height:1.55}
+      .mtf-address-v304-box{width:min(720px,96vw);background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,.28);overflow:hidden;display:flex;flex-direction:column;max-height:90vh}
+      .mtf-address-v304-body{padding:16px;overflow:auto;background:#f8fafc}
+      .mtf-address-v304-guide{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:12px;padding:12px 14px;line-height:1.55;margin-bottom:12px;font-weight:700}
+      .mtf-address-v304-guide small{display:block;color:#475569;font-weight:600;margin-top:4px}
+      .mtf-address-v304-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+      .mtf-address-v304-actions .mtf-btn{height:38px}
       .mtf-items{display:grid;gap:8px}
       .mtf-item-row{display:grid;grid-template-columns:2.2fr 1fr .8fr 1fr auto;gap:8px;align-items:end;padding:10px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc}
       .mtf-selected-bar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:12px 14px}
@@ -617,33 +618,11 @@
     return data;
   }
 
-  const customerSuggestCache = new Map();
-
   async function loadCustomers(force = false) {
-    // 화면 최초 로딩 또는 선택 보정용 최소 캐시입니다. 1만 건 전체를 매번
-    // 브라우저에서 필터링하지 않도록 제한합니다.
     if (!cache.customers || force) {
-      cache.customers = await api('/final/customers?limit=500');
+      cache.customers = await api('/final/customers?limit=300');
     }
     return cache.customers;
-  }
-
-  async function fetchCustomerSuggestions(keyword = '', fallbackCustomers = []) {
-    const q = String(keyword || '').trim();
-    const key = normalizeText(q);
-    if (customerSuggestCache.has(key)) return customerSuggestCache.get(key);
-
-    let rows = [];
-    try {
-      rows = await api(`/final/customer-suggest?q=${encodeURIComponent(q)}&limit=60`);
-    } catch (error) {
-      console.warn('[customer-suggest fallback]', error);
-      rows = rankCustomerMatches(fallbackCustomers, q).slice(0, 60);
-    }
-
-    customerSuggestCache.set(key, rows);
-    if (customerSuggestCache.size > 80) customerSuggestCache.delete(customerSuggestCache.keys().next().value);
-    return rows;
   }
 
   async function loadSites(force = false) {
@@ -728,15 +707,6 @@
     return /^[0-9\-\s().·]+$/.test(text);
   }
 
-  function stripCustomerCodePrefix(value) {
-    let text = String(value || '').trim();
-    // 엑셀 원장에서 가져온 "1.거래처명", "0001, 거래처명" 형태의
-    // 관리번호 접두어는 화면 표시명에서 제거합니다. 단, "1001안경"처럼
-    // 숫자가 실제 상호 일부인 경우는 유지합니다.
-    text = text.replace(/^\s*\d{1,8}\s*[.,]\s*(?=[가-힣A-Za-z])/, '');
-    return text.trim();
-  }
-
   function customerDisplayName(row = {}) {
     const candidates = [
       row.display_name,
@@ -749,11 +719,11 @@
       row.region
     ];
     for (const candidate of candidates) {
-      const text = stripCustomerCodePrefix(candidate);
+      const text = String(candidate || '').trim();
       if (text && !badCustomerName(text)) return text;
     }
     for (const candidate of candidates) {
-      const text = stripCustomerCodePrefix(candidate);
+      const text = String(candidate || '').trim();
       if (text) return text;
     }
     return '거래처명 미등록';
@@ -762,71 +732,99 @@
   function customerSubText(row = {}) {
     return [
       row.region,
-      row.code || row.customer_code,
       formatPhone(row.phone || row.customer_phone || row.site_phone || row.mobile),
       formatBusinessNo(row.business_no || row.customer_business_no)
     ].filter(Boolean).join(' · ');
   }
 
-  function customerPrimaryValues(row = {}) {
-    return [
-      customerDisplayName(row), row.name, row.customer_name, row.display_name,
-      row.customer_display_name, row.original_customer_name, row.site_original_customer_name,
-      row.site_name, row.region, row.code, row.customer_code
-    ].filter(Boolean).map(stripCustomerCodePrefix);
-  }
-
   function customerSearchValues(row = {}) {
     return [
-      ...customerPrimaryValues(row),
+      customerDisplayName(row), row.display_name, row.customer_display_name,
+      row.name, row.customer_name, row.code, row.customer_code,
       row.business_no, row.customer_business_no,
+      row.region, row.site_name, row.original_customer_name,
       row.phone, row.mobile, phoneDigits(row.phone), phoneDigits(row.mobile)
     ];
   }
 
-  function customerMatchScore(row = {}, keyword = '') {
-    const q = normalizeText(keyword);
+
+  function primaryCustomerSearchValues(row = {}) {
+    return [
+      customerDisplayName(row), row.display_name, row.customer_display_name,
+      row.name, row.customer_name, row.original_customer_name,
+      row.site_original_customer_name, row.site_name, row.region,
+      row.code, row.customer_code
+    ];
+  }
+
+  function contactCustomerSearchValues(row = {}) {
+    return [
+      row.phone, row.mobile, row.customer_phone, row.site_phone,
+      row.business_no, row.customer_business_no,
+      phoneDigits(row.phone), phoneDigits(row.mobile), phoneDigits(row.customer_phone),
+      phoneDigits(row.business_no), phoneDigits(row.customer_business_no)
+    ];
+  }
+
+  function customerSearchScore(row, keyword) {
+    const kw = normalizeText(keyword);
     const digits = phoneDigits(keyword);
-    if (!q) return 100;
+    if (!kw) return 100 + customerDisplayName(row).length;
 
     const name = normalizeText(customerDisplayName(row));
     const code = normalizeText(row.code || row.customer_code || '');
-    const site = normalizeText(row.site_name || row.region || '');
-    const primary = customerPrimaryValues(row).map(normalizeText).filter(Boolean);
+    const region = normalizeText(row.region || row.site_name || '');
+    const original = normalizeText(row.original_customer_name || row.site_original_customer_name || '');
 
-    if (name === q) return 0;
-    if (name.startsWith(q)) return 10;
-    if (name.includes(q)) return 20;
-    if (code === q) return 30;
-    if (code.startsWith(q)) return 35;
-    if (code.includes(q)) return 40;
-    if (primary.some((value) => value.startsWith(q))) return 50;
-    if (primary.some((value) => value.includes(q))) return 60;
-    if (site.includes(q)) return 75;
+    if (name === kw) return 0;
+    if (name.startsWith(kw)) return 10 + name.length;
+    if (name.includes(kw)) return 20 + name.indexOf(kw);
+    if (original && original.startsWith(kw)) return 30 + original.length;
+    if (original && original.includes(kw)) return 40 + original.indexOf(kw);
+    if (code && code.startsWith(kw)) return 50 + code.length;
+    if (code && code.includes(kw)) return 60 + code.indexOf(kw);
+    if (region && region.includes(kw)) return 70 + region.indexOf(kw);
 
-    // 전화/사업자번호는 보조 검색으로만 사용합니다. 거래처명 또는 코드가
-    // 매칭되는 자료가 있으면 프런트에서는 보조 검색 결과를 뒤로 보냅니다.
-    if (digits.length >= 5) {
-      const phone = phoneDigits(row.phone || row.mobile || row.customer_phone || row.site_phone);
-      const biz = phoneDigits(row.business_no || row.customer_business_no);
-      if (phone.startsWith(digits)) return 120;
-      if (phone.includes(digits)) return 130;
-      if (biz.includes(digits)) return 150;
+    // 전화·사업자번호 검색은 6자리 이상 입력했을 때만 보조 검색으로 사용합니다.
+    // 1001처럼 거래처명 검색 중 사업자번호에 우연히 포함된 거래처가 섞이는 문제를 방지합니다.
+    if (digits.length >= 6) {
+      const contactHit = contactCustomerSearchValues(row).some((value) => phoneDigits(value).includes(digits));
+      if (contactHit) return 200;
     }
-    return 999999;
+    return 9999;
   }
 
-  function rankCustomerMatches(rows = [], keyword = '') {
+  function localCustomerMatches(customers, keyword, limit = 40) {
+    const kw = normalizeText(keyword);
+    const rows = Array.isArray(customers) ? customers : [];
     const scored = rows
-      .map((row) => ({ row, score: customerMatchScore(row, keyword) }))
-      .filter((item) => item.score < 999999);
-    const hasPrimary = scored.some((item) => item.score < 100);
-    return scored
-      .filter((item) => !hasPrimary || item.score < 100)
-      .sort((a, b) =>
-        a.score - b.score || customerDisplayName(a.row).localeCompare(customerDisplayName(b.row), 'ko') || Number(a.row.id || 0) - Number(b.row.id || 0)
-      )
+      .map((row) => ({ row, score: customerSearchScore(row, kw) }))
+      .filter((item) => !kw || item.score < 9999)
+      .sort((a, b) => {
+        if (a.score !== b.score) return a.score - b.score;
+        return customerDisplayName(a.row).localeCompare(customerDisplayName(b.row), 'ko');
+      })
+      .slice(0, limit)
       .map((item) => item.row);
+    return scored;
+  }
+
+  const remoteCustomerSearchCache = new Map();
+  async function remoteCustomerMatches(keyword, fallbackRows, limit = 40) {
+    const kw = String(keyword || '').trim();
+    if (!kw) return localCustomerMatches(fallbackRows, kw, limit);
+    const key = `${kw}|${limit}`;
+    if (remoteCustomerSearchCache.has(key)) return remoteCustomerSearchCache.get(key);
+    try {
+      const rows = await api(`/final/customers/search?q=${encodeURIComponent(kw)}&limit=${limit}`);
+      const result = Array.isArray(rows) && rows.length ? rows : localCustomerMatches(fallbackRows, kw, limit);
+      remoteCustomerSearchCache.set(key, result);
+      if (remoteCustomerSearchCache.size > 100) remoteCustomerSearchCache.delete(remoteCustomerSearchCache.keys().next().value);
+      return result;
+    } catch (error) {
+      console.warn('customer remote search fallback', error);
+      return localCustomerMatches(fallbackRows, kw, limit);
+    }
   }
 
   function customerAutocompleteHtml({
@@ -862,15 +860,15 @@
     `;
   }
 
-  function bindCustomerAutocomplete(scope, customers = [], options = {}) {
+  function bindCustomerAutocomplete(scope, customers, options = {}) {
     scope.querySelectorAll('[data-mtf-ac]').forEach((wrapper) => {
       const input = wrapper.querySelector('[data-mtf-ac-input]');
       const hidden = wrapper.querySelector('[data-mtf-ac-value]');
       const list = wrapper.querySelector('[data-mtf-ac-list]');
       let matches = [];
       let activeIndex = -1;
-      let debounceTimer = null;
-      let requestSeq = 0;
+      let searchTimer = null;
+      let searchSerial = 0;
 
       function updateActiveItem() {
         list.querySelectorAll('[data-customer-id]').forEach((button, index) => {
@@ -879,42 +877,38 @@
         });
       }
 
-      function drawMatches(keyword) {
+      function drawMatches(rows, loading = false) {
+        matches = rows || [];
         activeIndex = -1;
-        list.innerHTML = matches.length
-          ? matches.map((customer) => `
-              <button type="button" class="mtf-ac-item" data-customer-id="${customer.id}">
-                <strong>${escapeHtml(customerDisplayName(customer))}</strong>
-                <span class="mtf-sub">${escapeHtml(customerSubText(customer))}</span>
-              </button>
-            `).join('')
-          : `<div class="mtf-empty compact">${keyword ? '일치하는 거래처가 없습니다.' : '거래처명을 입력하세요.'}</div>`;
-        list.hidden = false;
-      }
-
-      async function renderMatchesNow() {
-        const keyword = input.value.trim();
-        const seq = ++requestSeq;
-        list.hidden = false;
-        list.innerHTML = '<div class="mtf-empty compact">조회 중...</div>';
-        try {
-          const remoteRows = await fetchCustomerSuggestions(keyword, customers);
-          if (seq !== requestSeq) return;
-          matches = rankCustomerMatches(remoteRows, keyword).slice(0, 40);
-          // 서버가 이미 관련도 순으로 내려주지만, 프런트에서 다시 한 번
-          // 거래처명/코드 우선으로 보정합니다.
-          drawMatches(keyword);
-        } catch (error) {
-          console.warn(error);
-          if (seq !== requestSeq) return;
-          matches = rankCustomerMatches(customers, keyword).slice(0, 40);
-          drawMatches(keyword);
+        if (loading) {
+          list.innerHTML = '<div class="mtf-empty compact">거래처 검색 중...</div>';
+        } else if (matches.length) {
+          list.innerHTML = matches.map((customer) => `
+            <button type="button" class="mtf-ac-item" data-customer-id="${customer.id}">
+              <strong>${escapeHtml(customerDisplayName(customer))}</strong>
+              <span class="mtf-sub">${escapeHtml(customerSubText(customer))}</span>
+            </button>
+          `).join('');
+        } else {
+          list.innerHTML = '<div class="mtf-empty compact">입력한 단어를 포함한 거래처가 없습니다.</div>';
         }
+        list.hidden = false;
       }
 
-      function scheduleMatches(delay = 160) {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(renderMatchesNow, delay);
+      async function renderMatches(immediate = false) {
+        const keyword = input.value.trim();
+        const serial = ++searchSerial;
+        clearTimeout(searchTimer);
+
+        const run = async () => {
+          drawMatches(localCustomerMatches(customers, keyword, 10), true);
+          const rows = await remoteCustomerMatches(keyword, customers, 40);
+          if (serial !== searchSerial) return;
+          drawMatches(rows, false);
+        };
+
+        if (immediate) await run();
+        else searchTimer = setTimeout(run, keyword ? 180 : 0);
       }
 
       function selectCustomer(customer) {
@@ -930,17 +924,17 @@
 
       input.addEventListener('input', () => {
         hidden.value = '';
+        renderMatches(false);
         options.onInput?.(input.value);
-        scheduleMatches(180);
       });
 
-      input.addEventListener('focus', () => scheduleMatches(0));
+      input.addEventListener('focus', () => renderMatches(true));
 
-      input.addEventListener('keydown', (event) => {
+      input.addEventListener('keydown', async (event) => {
         if (event.isComposing || event.keyCode === 229) return;
         if (event.key === 'ArrowDown') {
           event.preventDefault();
-          if (list.hidden) scheduleMatches(0);
+          if (list.hidden) await renderMatches(true);
           if (matches.length) {
             activeIndex = Math.min(activeIndex + 1, matches.length - 1);
             updateActiveItem();
@@ -961,7 +955,9 @@
           return;
         }
         if (event.key === 'Enter') {
-          const selected = matches[activeIndex] || (matches.length === 1 ? matches[0] : null);
+          if (!matches.length) await renderMatches(true);
+          const exact = matches.find((customer) => normalizeText(customerDisplayName(customer)) === normalizeText(input.value));
+          const selected = matches[activeIndex] || exact || (matches.length === 1 ? matches[0] : null);
           if (selected) {
             event.preventDefault();
             event.stopPropagation();
@@ -972,9 +968,7 @@
 
       input.addEventListener('blur', () => {
         setTimeout(() => {
-          const exact = matches.find((customer) =>
-            normalizeText(customerDisplayName(customer)) === normalizeText(input.value)
-          );
+          const exact = matches.find((customer) => normalizeText(customerDisplayName(customer)) === normalizeText(input.value));
           if (exact) selectCustomer(exact);
           else if (!input.value.trim()) selectCustomer(null);
           list.hidden = true;
@@ -992,8 +986,7 @@
         const button = event.target.closest('[data-customer-id]');
         if (!button) return;
         event.preventDefault();
-        const customer = matches.find((row) => String(row.id) === button.dataset.customerId)
-          || customers.find((row) => String(row.id) === button.dataset.customerId);
+        const customer = matches.find((row) => String(row.id) === button.dataset.customerId);
         selectCustomer(customer);
       });
     });
@@ -1041,215 +1034,177 @@
     ].join('');
   }
 
-  let postcodeScriptPromise = null;
-
-  function isIpHost(hostname = location.hostname) {
-    return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
-  }
-
-  function shouldUseAddressFallback() {
-    // 카카오 주소검색 iframe은 일부 브라우저/보안정책에서 HTTP 또는 IP 주소
-    // 접속 환경일 때 about:blank/콘텐츠 차단으로 표시될 수 있습니다.
-    // 운영 도메인+HTTPS가 아닌 경우에는 처음부터 직접입력/새창 모드로 열어
-    // 오류 화면을 보이지 않게 합니다.
-    return location.protocol !== 'https:' || isIpHost(location.hostname);
-  }
-
-  function ensurePostcodeScript() {
-    if (window.daum?.Postcode) return Promise.resolve();
-    if (postcodeScriptPromise) return postcodeScriptPromise;
-    postcodeScriptPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector('script[data-mtf-postcode-script]');
-      if (existing) {
-        existing.addEventListener('load', resolve, { once: true });
-        existing.addEventListener('error', reject, { once: true });
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
-      script.async = true;
-      script.defer = true;
-      script.dataset.mtfPostcodeScript = '1';
-      script.onload = resolve;
-      script.onerror = () => reject(new Error('주소검색 스크립트를 불러오지 못했습니다.'));
-      document.head.appendChild(script);
-    });
-    return postcodeScriptPromise;
-  }
+  // V304: 주소검색 근본 안정화
+  // 현재 운영환경(IP + HTTP + nginx)에서는 카카오/다음 우편번호 iframe 또는 팝업이 브라우저/CSP 정책에 의해
+  // about:blank 차단 화면으로 멈추는 현상이 반복되었습니다. 따라서 외부 iframe/embed/open 호출을 완전히 중단하고,
+  // 1) 내부 직접입력, 2) 공식 도로명주소 검색 새창, 3) 필요 시 카카오 우편번호 서비스 새창 안내 방식으로 고정합니다.
+  // 이 방식은 외부 스크립트 로딩 실패나 iframe 차단에 영향을 받지 않습니다.
 
   function findAddressBlockFromButton(button) {
-    return button.closest('[data-mtf-address-block]') || button.closest('.address-block');
+    return button.closest('[data-mtf-address-block]')
+      || button.closest('.address-block')
+      || button.closest('form')
+      || button.closest('.modal')
+      || document;
   }
 
-  function fillAddressBlock(block, data) {
-    if (!block || !data) return;
-    const selectedType = data.userSelectedType === 'J' || data.address_type === 'J' ? 'J' : 'R';
-    const road = data.roadAddress || data.autoRoadAddress || data.road_address || '';
-    const jibun = data.jibunAddress || data.autoJibunAddress || data.jibun_address || '';
-    const selected = data.address || (selectedType === 'J' ? (jibun || road) : (road || jibun));
-    const fields = {
-      postal_code: data.zonecode || data.postal_code || '',
+  function addressField(block, name) {
+    return block.querySelector(`[name="${name}"]`);
+  }
+
+  function addressCurrentValue(block, ...names) {
+    for (const name of names) {
+      const element = addressField(block, name);
+      if (element && String(element.value || '').trim()) return String(element.value || '').trim();
+    }
+    return '';
+  }
+
+  function fillAddressBlock(block, data = {}) {
+    if (!block) return;
+    const postal = String(data.postal_code || data.zonecode || '').trim();
+    const road = String(data.road_address || data.roadAddress || data.address || '').trim();
+    const jibun = String(data.jibun_address || data.jibunAddress || '').trim();
+    const detail = String(data.detail_address || '').trim();
+    const selected = road || jibun;
+    const values = {
+      postal_code: postal,
       road_address: road,
       jibun_address: jibun,
-      address_type: selectedType,
-      address: selected
+      address_type: road ? 'R' : (jibun ? 'J' : ''),
+      address: selected,
+      detail_address: detail
     };
-    Object.entries(fields).forEach(([name, value]) => {
-      const element = block.querySelector(`[name="${name}"]`);
-      if (element) element.value = value;
+    Object.entries(values).forEach(([name, value]) => {
+      const element = addressField(block, name);
+      if (!element) return;
+      if (name === 'detail_address' && !value && element.value) return;
+      element.value = value;
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    block.querySelector('[name="detail_address"]')?.focus();
+    const detailInput = addressField(block, 'detail_address');
+    if (detailInput) detailInput.focus();
   }
 
-  function openManualAddressLayer(block, message = '') {
-    if (!block) return;
-    document.querySelectorAll('.mtf-postcode-layer').forEach((node) => node.remove());
-    const current = {
-      postal_code: block.querySelector('[name="postal_code"]')?.value || '',
-      address: block.querySelector('[name="address"]')?.value || '',
-      road_address: block.querySelector('[name="road_address"]')?.value || '',
-      jibun_address: block.querySelector('[name="jibun_address"]')?.value || '',
-      detail_address: block.querySelector('[name="detail_address"]')?.value || '',
-      address_type: block.querySelector('[name="address_type"]')?.value || 'R'
-    };
+  function openOfficialAddressSite(keyword = '') {
+    const url = 'https://www.juso.go.kr/openIndexPage.do';
+    const popup = window.open(url, 'jusoSearchV304', 'width=1100,height=780,scrollbars=yes,resizable=yes');
+    if (!popup) {
+      showToast('팝업이 차단되었습니다. 브라우저 주소창에서 www.juso.go.kr 을 열어 주소를 검색하세요.', 'error');
+      return;
+    }
+    try { popup.focus(); } catch (_) {}
+    if (keyword) showToast(`새창에서 "${keyword}"로 검색 후 우편번호와 도로명주소를 복사해 입력하세요.`, 'info');
+  }
+
+  function openAddressManualModal(button) {
+    const block = findAddressBlockFromButton(button);
+    document.querySelectorAll('.mtf-postcode-layer,.mtf-address-v304-layer').forEach((node) => node.remove());
+
     const layer = document.createElement('div');
-    layer.className = 'mtf-postcode-layer';
+    layer.className = 'mtf-postcode-layer mtf-address-v304-layer';
+    const postal = addressCurrentValue(block, 'postal_code', 'postcode', 'zip_code');
+    const road = addressCurrentValue(block, 'road_address', 'address');
+    const jibun = addressCurrentValue(block, 'jibun_address');
+    const detail = addressCurrentValue(block, 'detail_address', 'address_detail');
+    const keyword = road || jibun || addressCurrentValue(block, 'name', 'customer_name', 'site_name');
+
     layer.innerHTML = `
-      <div class="mtf-postcode-box mtf-address-fallback">
+      <div class="mtf-address-v304-box">
         <div class="mtf-postcode-head">
-          <strong>주소입력</strong>
-          <button type="button" class="mtf-btn small" data-close-postcode>닫기</button>
+          <strong>우편번호 / 주소 입력</strong>
+          <button type="button" class="mtf-btn small" data-close-address-v304>닫기</button>
         </div>
-        <div class="mtf-postcode-body" style="padding:16px;overflow:auto">
-          <div class="mtf-notice compact">
-            ${escapeHtml(message || '현재 접속 환경에서는 카카오 주소검색이 차단될 수 있어 직접입력 방식으로 전환했습니다.')}
-            <br>주소 검색 사이트를 새 창으로 열어 우편번호와 주소를 복사한 뒤 입력하세요.
+        <div class="mtf-address-v304-body">
+          <div class="mtf-address-v304-guide">
+            이 운영환경에서는 카카오 주소검색 팝업/iframe이 차단되어 빈 화면이 반복됩니다.<br>
+            따라서 우편번호와 주소는 아래에 직접 입력하고, 필요하면 공식 도로명주소 검색 사이트를 새창으로 열어 복사 입력합니다.
+            <small>한 번 저장된 우편번호·도로명주소·상세주소는 기존 거래처 정보에 그대로 저장됩니다.</small>
           </div>
-          <div class="mtf-form-grid" style="margin-top:14px">
+          <div class="mtf-form-grid">
             <div class="mtf-field">
               <label>우편번호</label>
-              <input class="mtf-input" data-manual-postal value="${escapeHtml(current.postal_code)}">
-            </div>
-            <div class="mtf-field">
-              <label>주소구분</label>
-              <select class="mtf-select" data-manual-type>
-                <option value="R" ${current.address_type === 'R' ? 'selected' : ''}>도로명주소</option>
-                <option value="J" ${current.address_type === 'J' ? 'selected' : ''}>지번주소</option>
-              </select>
+              <input class="mtf-input" name="v304_postal_code" value="${escapeHtml(postal)}" placeholder="예: 12345" inputmode="numeric">
             </div>
             <div class="mtf-field mtf-span-2">
-              <label>주소</label>
-              <input class="mtf-input" data-manual-address value="${escapeHtml(current.address)}">
+              <label>도로명주소</label>
+              <input class="mtf-input" name="v304_road_address" value="${escapeHtml(road)}" placeholder="예: 경북 구미시 ...">
             </div>
-            <div class="mtf-field mtf-span-2">
+            <div class="mtf-field mtf-span-3">
+              <label>지번주소(선택)</label>
+              <input class="mtf-input" name="v304_jibun_address" value="${escapeHtml(jibun)}" placeholder="필요 시 입력">
+            </div>
+            <div class="mtf-field mtf-span-3">
               <label>상세주소</label>
-              <input class="mtf-input" data-manual-detail value="${escapeHtml(current.detail_address)}">
+              <input class="mtf-input" name="v304_detail_address" value="${escapeHtml(detail)}" placeholder="동·층·호 등">
             </div>
           </div>
-          <div class="mtf-actions" style="margin-top:14px;justify-content:flex-end">
-            <button type="button" class="mtf-btn" data-open-juso>주소검색 새창</button>
-            <button type="button" class="mtf-btn primary" data-apply-manual>입력값 반영</button>
+          <div class="mtf-address-v304-actions">
+            <button type="button" class="mtf-btn" data-open-juso-v304>도로명주소 검색 새창 열기</button>
+            <button type="button" class="mtf-btn" data-copy-juso-v304>주소검색 사이트 주소 복사</button>
+            <button type="button" class="mtf-btn primary" data-apply-address-v304>주소 적용</button>
           </div>
         </div>
       </div>
     `;
     document.body.appendChild(layer);
+
     const close = () => layer.remove();
-    layer.querySelector('[data-close-postcode]').addEventListener('click', close);
+    layer.querySelector('[data-close-address-v304]').addEventListener('click', close);
     layer.addEventListener('click', (event) => { if (event.target === layer) close(); });
-    layer.querySelector('[data-open-juso]').addEventListener('click', () => {
-      window.open('https://www.juso.go.kr/openIndexPage.do', '_blank', 'noopener,noreferrer');
+    layer.querySelector('[data-open-juso-v304]').addEventListener('click', () => openOfficialAddressSite(keyword));
+    layer.querySelector('[data-copy-juso-v304]').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText('https://www.juso.go.kr/openIndexPage.do');
+        showToast('주소검색 사이트 주소를 복사했습니다.', 'success');
+      } catch (_) {
+        showToast('www.juso.go.kr 을 새 탭에서 열어 주소를 검색하세요.', 'info');
+      }
     });
-    layer.querySelector('[data-apply-manual]').addEventListener('click', () => {
-      const postal = layer.querySelector('[data-manual-postal]').value.trim();
-      const address = layer.querySelector('[data-manual-address]').value.trim();
-      const detail = layer.querySelector('[data-manual-detail]').value.trim();
-      const type = layer.querySelector('[data-manual-type]').value || 'R';
+    layer.querySelector('[data-apply-address-v304]').addEventListener('click', () => {
       fillAddressBlock(block, {
-        postal_code: postal,
-        address,
-        road_address: type === 'R' ? address : current.road_address,
-        jibun_address: type === 'J' ? address : current.jibun_address,
-        address_type: type
+        postal_code: layer.querySelector('[name="v304_postal_code"]').value,
+        road_address: layer.querySelector('[name="v304_road_address"]').value,
+        jibun_address: layer.querySelector('[name="v304_jibun_address"]').value,
+        detail_address: layer.querySelector('[name="v304_detail_address"]').value
       });
-      const detailField = block.querySelector('[name="detail_address"]');
-      if (detailField) detailField.value = detail;
       close();
+      showToast('주소를 입력 영역에 반영했습니다.', 'success');
     });
-    setTimeout(() => layer.querySelector('[data-manual-address]')?.focus(), 50);
+    setTimeout(() => layer.querySelector('[name="v304_postal_code"]')?.focus(), 50);
   }
 
-  async function openSafePostcodeLayer(button) {
-    const block = findAddressBlockFromButton(button);
-    if (!block) {
-      showToast('주소 입력 영역을 찾지 못했습니다.', 'error');
-      return;
+  function isAddressSearchTrigger(target) {
+    const element = target.closest('[data-mtf-address-search], .address-search-btn, button, a');
+    if (!element) return null;
+    if (element.matches('[data-mtf-address-search], .address-search-btn')) return element;
+    const label = normalizeText(element.textContent || element.value || element.getAttribute('aria-label') || '');
+    if (label.includes('주소검색') || label.includes('우편번호')) {
+      const inCustomerForm = element.closest('[data-mtf-address-block], .address-block, form, .modal, .mtf-modal');
+      if (inCustomerForm) return element;
     }
-    if (shouldUseAddressFallback()) {
-      openManualAddressLayer(block, '현재처럼 IP 주소 또는 HTTP로 접속한 경우 카카오 주소검색 창이 브라우저에서 차단될 수 있습니다.');
-      return;
-    }
-    try {
-      await ensurePostcodeScript();
-    } catch (error) {
-      openManualAddressLayer(block, error.message || '주소검색 스크립트를 불러오지 못했습니다.');
-      return;
-    }
-    if (!window.daum?.Postcode) {
-      openManualAddressLayer(block, '주소검색 서비스를 사용할 수 없어 직접입력으로 전환했습니다.');
-      return;
-    }
-    document.querySelectorAll('.mtf-postcode-layer').forEach((node) => node.remove());
-    const layer = document.createElement('div');
-    layer.className = 'mtf-postcode-layer';
-    layer.innerHTML = `
-      <div class="mtf-postcode-box">
-        <div class="mtf-postcode-head">
-          <strong>주소검색</strong>
-          <div class="mtf-actions">
-            <button type="button" class="mtf-btn small" data-manual-address>직접입력</button>
-            <button type="button" class="mtf-btn small" data-close-postcode>닫기</button>
-          </div>
-        </div>
-        <div class="mtf-postcode-body"></div>
-      </div>
-    `;
-    document.body.appendChild(layer);
-    const close = () => layer.remove();
-    layer.querySelector('[data-close-postcode]').addEventListener('click', close);
-    layer.querySelector('[data-manual-address]').addEventListener('click', () => { close(); openManualAddressLayer(block); });
-    layer.addEventListener('click', (event) => { if (event.target === layer) close(); });
-    try {
-      new window.daum.Postcode({
-        width: '100%',
-        height: '100%',
-        animation: true,
-        oncomplete(data) { fillAddressBlock(block, data); close(); },
-        onclose() { close(); }
-      }).embed(layer.querySelector('.mtf-postcode-body'));
-      // iframe 차단 또는 빈 화면 상황에 대비해 직접입력 버튼을 항상 제공합니다.
-      setTimeout(() => {
-        const body = layer.querySelector('.mtf-postcode-body');
-        if (body && body.childElementCount === 0) {
-          close();
-          openManualAddressLayer(block, '주소검색 화면이 열리지 않아 직접입력으로 전환했습니다.');
-        }
-      }, 1800);
-    } catch (error) {
-      console.error(error);
-      close();
-      openManualAddressLayer(block, '주소검색 창을 열지 못해 직접입력으로 전환했습니다.');
-    }
+    return null;
   }
 
   function bindAddressSearch(scope) {
-    scope.querySelectorAll('[data-mtf-address-search]').forEach((button) => {
-      button.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openSafePostcodeLayer(button);
-      });
+    scope.querySelectorAll('[data-mtf-address-search], .address-search-btn').forEach((button) => {
+      button.dataset.mtfAddressV304 = '1';
     });
+  }
+
+  // 캡처 단계에서 모든 기존 카카오/다음 주소검색 이벤트보다 먼저 차단합니다.
+  // stopImmediatePropagation으로 이전 버전의 popup/open/embed 핸들러가 실행되지 않게 합니다.
+  if (!window.__MT_OPTICS_ADDRESS_V304_CAPTURE__) {
+    window.__MT_OPTICS_ADDRESS_V304_CAPTURE__ = true;
+    document.addEventListener('click', (event) => {
+      const trigger = isAddressSearchTrigger(event.target);
+      if (!trigger) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+      openAddressManualModal(trigger);
+    }, true);
   }
 
   function addressFields(row = {}) {
@@ -1580,7 +1535,7 @@
     const token = ++activeRenderToken;
     const q = uiState.customerSearch || '';
     const rows = await api(
-      `/final/customers?q=${encodeURIComponent(q)}&limit=10000`
+      `/final/customers?q=${encodeURIComponent(q)}&limit=${q ? 500 : 300}`
     );
     if (token !== activeRenderToken || activePage() !== 'customers') return;
 
@@ -1592,7 +1547,7 @@
     );
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="customers-v303">
+      <div class="mtf-root" data-mtf-view="customers-v304">
         <div class="mtf-head">
           <div><h1>거래처/원장</h1></div>
           <div class="mtf-actions">
@@ -1824,7 +1779,7 @@
     );
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="orders-v303">
+      <div class="mtf-root" data-mtf-view="orders-v304">
         <div class="mtf-head">
           <div><h1>주문/출고</h1></div>
           <div class="mtf-actions">
@@ -2967,7 +2922,7 @@
       : '발송구분별 미수금은 아래 별도 조건에서 거래처 또는 발송구분을 선택한 뒤 조회하세요.';
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="payments-v303">
+      <div class="mtf-root" data-mtf-view="payments-v304">
         <div class="mtf-head">
           <div><h1>수금/미수금</h1></div>
           <div class="mtf-actions"><button class="mtf-btn help" data-page-help>도움말</button></div>
@@ -3231,7 +3186,7 @@
     const el = contentElement();
     if (!el || !['customers', 'orders', 'payments'].includes(page)) return;
 
-    const marker = el.querySelector(`[data-mtf-view="${page}-v303"]`);
+    const marker = el.querySelector(`[data-mtf-view="${page}-v304"]`);
     if (marker && !force) return;
 
     try {
@@ -3253,15 +3208,15 @@
   }
 
 
-  // 주소검색은 기존 app.js의 팝업 방식이 섞여 있어도 이 캡처 단계에서 가로채
-  // 화면 내부 레이어 방식으로만 실행합니다. about:blank 팝업 오류 방지용입니다.
+  // V304 주소검색 최종 차단기: 기존 app.js 또는 이전 패치의 카카오 팝업/iframe 핸들러보다 먼저 실행합니다.
+  // 이 부분은 open/embed를 전혀 호출하지 않고 내부 직접입력 모달만 엽니다.
   document.addEventListener('click', (event) => {
-    const button = event.target.closest('.address-search-btn,[data-mtf-address-search]');
-    if (!button) return;
+    const trigger = isAddressSearchTrigger(event.target);
+    if (!trigger) return;
     event.preventDefault();
     event.stopPropagation();
-    event.stopImmediatePropagation();
-    openSafePostcodeLayer(button);
+    if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+    openAddressManualModal(trigger);
   }, true);
 
   const observer = new MutationObserver(() => {
@@ -3293,5 +3248,5 @@
   window.addEventListener('load', () => scheduleRender(true));
   scheduleRender(true);
 
-  console.info(`MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V303 ${VERSION} 수정본 로드 완료`);
+  console.info(`MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V304 ${VERSION} 수정본 로드 완료`);
 })();

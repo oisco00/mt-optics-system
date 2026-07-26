@@ -252,3 +252,14 @@ tr:hover td { background: #fcfcfd; }
   .mobile-quickbar button { background: transparent; color: #475467; padding: 8px 4px; font-size: 12px; min-height: 42px; }
   .mobile-quickbar button.active { color: var(--brand); background: #eef2ff; }
 }
+
+
+/* FINAL V303: faster customer autocomplete + resilient address search */
+.mtf-ac-list { z-index: 10020; }
+.mtf-ac-item strong { color: #0f172a !important; font-weight: 800 !important; display: block; }
+.mtf-ac-item .mtf-sub { color: #475569 !important; font-size: 12px; margin-top: 3px; display: block; }
+.mtf-postcode-layer { position: fixed; inset: 0; z-index: 30000; background: rgba(15,23,42,.45); display: flex; align-items: center; justify-content: center; padding: 18px; }
+.mtf-postcode-box { width: min(760px, 96vw); max-height: 92vh; background: #fff; border-radius: 18px; box-shadow: 0 24px 80px rgba(15,23,42,.35); overflow: hidden; display: flex; flex-direction: column; }
+.mtf-postcode-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; }
+.mtf-postcode-body { min-height: 420px; height: min(560px, 56vh); background: #fff; }
+.mtf-postcode-manual { border-top: 1px solid #e5e7eb; padding: 14px 18px; background: #f8fafc; }

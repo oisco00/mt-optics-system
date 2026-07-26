@@ -941,5 +941,5 @@ const renderers = {
 // MT_OPTICS_UPLOAD_UI_LOADER_V157
 import("/excel-upload-ui-fix.js?v=157").catch(console.error);
 
-// MT_OPTICS_FINAL_FEATURES_LOADER_V302
-import("/final-enhancements-v303.js?v=303").catch(console.error);
+// MT_OPTICS_FINAL_FEATURES_LOADER_V304
+import("/final-enhancements-v304.js?v=304").catch(console.error);

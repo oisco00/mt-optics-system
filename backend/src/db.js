@@ -305,12 +305,6 @@ async function ensureV14Schema(targetPool) {
   await ensureIndex(targetPool, 'payments', 'idx_payments_delivery_type', 'CREATE INDEX idx_payments_delivery_type ON payments(delivery_type)');
   await ensureIndex(targetPool, 'receivable_transactions', 'idx_receivable_site_date', 'CREATE INDEX idx_receivable_site_date ON receivable_transactions(customer_site_id, txn_date)');
   await ensureIndex(targetPool, 'receivable_transactions', 'idx_receivable_delivery_type', 'CREATE INDEX idx_receivable_delivery_type ON receivable_transactions(delivery_type)');
-  await ensureIndex(targetPool, 'customers', 'idx_customers_name_status', 'CREATE INDEX idx_customers_name_status ON customers(name, status)');
-  await ensureIndex(targetPool, 'customers', 'idx_customers_code_status', 'CREATE INDEX idx_customers_code_status ON customers(code, status)');
-  await ensureIndex(targetPool, 'customers', 'idx_customers_phone', 'CREATE INDEX idx_customers_phone ON customers(phone)');
-  await ensureIndex(targetPool, 'customers', 'idx_customers_business_no', 'CREATE INDEX idx_customers_business_no ON customers(business_no)');
-  await ensureIndex(targetPool, 'customer_sites', 'idx_customer_sites_site_name', 'CREATE INDEX idx_customer_sites_site_name ON customer_sites(site_name)');
-  await ensureIndex(targetPool, 'customer_sites', 'idx_customer_sites_original_name', 'CREATE INDEX idx_customer_sites_original_name ON customer_sites(original_customer_name)');
 
   // 기존 거래처에는 기본 납품처를 하나 만들어 과거 자료와 새 구조를 연결합니다.
   await targetPool.query(`INSERT IGNORE INTO customer_sites(customer_id, site_code, site_name, original_customer_name, phone, mobile, address, region, default_delivery_type, default_delivery_group, sales_rep_id, opening_receivable, credit_limit, status, memo, created_by, updated_by)

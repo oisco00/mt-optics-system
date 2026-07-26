@@ -43,11 +43,11 @@ app.use(cors({
 }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  // X-Frame-Options is intentionally not set because the Daum/Kakao postcode widget uses nested frames.
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
-  res.setHeader('Content-Security-Policy', "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-src 'self' https: data: blob:; child-src 'self' https: data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'");
+  res.setHeader('Content-Security-Policy', "default-src 'self' https: http: data: blob: about:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; style-src 'self' 'unsafe-inline' https: http:; img-src 'self' data: blob: https: http:; connect-src 'self' https: http:; frame-src 'self' about: data: blob: https://t1.daumcdn.net https://*.daumcdn.net https://postcode.map.daum.net https://*.daum.net https://*.kakao.com https: http:; child-src 'self' about: data: blob: https://t1.daumcdn.net https://*.daumcdn.net https://postcode.map.daum.net https://*.daum.net https://*.kakao.com https: http:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'");
   next();
 });
 app.use(express.json({ limit: '3mb' }));
@@ -528,7 +528,7 @@ api.post('/auth/login', loginLimiter, asyncHandler(async (req, res) => {
 
 api.use(authRequired);
 
-// MT_OPTICS_FINAL_BACKEND_V301
+// MT_OPTICS_FINAL_BACKEND_V304
 api.use('/final', createFinalEnhancementsRouter());
 
 api.get('/auth/me', asyncHandler(async (req, res) => {

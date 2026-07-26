@@ -83,10 +83,6 @@ function createFinalEnhancementsRouter() {
     return /^[0-9\-\s().·]+$/.test(text);
   }
 
-  function stripCustomerCodePrefix(value) {
-    return String(value || '').trim().replace(/^\s*\d{1,8}\s*[.,]\s*(?=[가-힣A-Za-z])/, '').trim();
-  }
-
   function displayName(row = {}) {
     const candidates = [
       row.display_name, row.customer_display_name, row.name, row.customer_name,
@@ -94,11 +90,10 @@ function createFinalEnhancementsRouter() {
       row.site_name, row.region
     ];
     for (const candidate of candidates) {
-      const text = stripCustomerCodePrefix(clean(candidate));
+      const text = clean(candidate);
       if (text && !badName(text)) return text;
     }
-    const fallback = candidates.find(Boolean);
-    return stripCustomerCodePrefix(clean(fallback)) || '거래처명 미등록';
+    return clean(candidates.find(Boolean)) || '거래처명 미등록';
   }
 
   function decorateCustomer(row = {}) {
@@ -111,6 +106,69 @@ function createFinalEnhancementsRouter() {
       mobile_display: formatPhone(row.mobile),
       customer_phone_display: formatPhone(row.customer_phone || row.phone)
     };
+  }
+
+
+  let finalIndexPromise = null;
+  async function ensureCustomerSearchIndexes(pool) {
+    if (finalIndexPromise) return finalIndexPromise;
+    finalIndexPromise = (async () => {
+      async function ensureIndex(tableName, indexName, columnSql) {
+        const [rows] = await pool.execute(
+          `SELECT 1
+             FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = ?
+              AND index_name = ?
+            LIMIT 1`,
+          [tableName, indexName]
+        );
+        if (rows.length) return;
+        try {
+          await pool.query(`ALTER TABLE ${tableName} ADD INDEX ${indexName} ${columnSql}`);
+        } catch (error) {
+          // Duplicate index or old MySQL metadata races should not block work.
+          if (!/Duplicate|already exists|ER_DUP_KEYNAME/i.test(String(error.message || ''))) {
+            console.warn(`index create skipped: ${tableName}.${indexName}`, error.message);
+          }
+        }
+      }
+      await ensureIndex('customers', 'idx_customers_v303_name_code', '(name, code)');
+      await ensureIndex('customers', 'idx_customers_v303_phone', '(phone)');
+      await ensureIndex('customers', 'idx_customers_v303_business', '(business_no)');
+      await ensureIndex('customer_sites', 'idx_sites_v303_customer_name', '(customer_id, site_name)');
+      await ensureIndex('customer_sites', 'idx_sites_v303_original', '(original_customer_name)');
+    })();
+    return finalIndexPromise;
+  }
+
+  function phoneDigits(value) {
+    return String(value || '').replace(/\D/g, '');
+  }
+
+  function customerSearchScore(row, keyword) {
+    const kw = String(keyword || '').trim().toLocaleLowerCase('ko-KR');
+    const digits = phoneDigits(keyword);
+    if (!kw) return 100 + String(row.display_name || row.name || '').length;
+    const name = String(row.display_name || row.name || '').trim().toLocaleLowerCase('ko-KR');
+    const original = String(row.original_customer_name || row.site_search_text || '').trim().toLocaleLowerCase('ko-KR');
+    const code = String(row.code || '').trim().toLocaleLowerCase('ko-KR');
+    const region = String(row.region || '').trim().toLocaleLowerCase('ko-KR');
+    if (name === kw) return 0;
+    if (name.startsWith(kw)) return 10 + name.length;
+    if (name.includes(kw)) return 20 + name.indexOf(kw);
+    if (original && original.startsWith(kw)) return 30 + original.length;
+    if (original && original.includes(kw)) return 40 + original.indexOf(kw);
+    if (code && code.startsWith(kw)) return 50 + code.length;
+    if (code && code.includes(kw)) return 60 + code.indexOf(kw);
+    if (region && region.includes(kw)) return 70 + region.indexOf(kw);
+    if (digits.length >= 6) {
+      const contacts = [row.phone, row.mobile, row.business_no, row.site_phone, row.site_business_no]
+        .map(phoneDigits)
+        .join(' ');
+      if (contacts.includes(digits)) return 200;
+    }
+    return 9999;
   }
 
   function hasPermission(user, code) {
@@ -252,52 +310,38 @@ function createFinalEnhancementsRouter() {
     })
   );
 
-
   router.get(
-    '/customer-suggest',
+    '/customers/search',
     requirePermission('customers.read'),
     asyncRoute(async (req, res) => {
       const pool = await getPool();
-      const q = clean(req.query.q);
-      const limit = Math.min(Math.max(toInt(req.query.limit, 60), 1), 100);
+      await ensureCustomerSearchIndexes(pool);
+      const q = clean(req.query.q) || '';
+      const limit = Math.min(Math.max(toInt(req.query.limit, 40), 1), 80);
+      const digits = phoneDigits(q);
+      const includeContact = digits.length >= 6;
       const params = [];
-      let where = "c.status <> 'deleted'";
-      let orderClause = 'ORDER BY c.name ASC, c.id ASC';
+      const conditions = ["c.status <> 'deleted'"];
 
       if (q) {
         const like = `%${q}%`;
-        const prefix = `${q}%`;
-        where += ` AND (
+        const contactSql = includeContact
+          ? ` OR REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'-',''),' ',''),'.','') LIKE ?
+              OR REPLACE(REPLACE(REPLACE(COALESCE(c.mobile,''),'-',''),' ',''),'.','') LIKE ?
+              OR REPLACE(REPLACE(REPLACE(COALESCE(c.business_no,''),'-',''),' ',''),'.','') LIKE ?`
+          : '';
+        conditions.push(`(
           c.name LIKE ? OR c.code LIKE ? OR c.region LIKE ?
           OR EXISTS (
-            SELECT 1 FROM customer_sites csx
-             WHERE csx.customer_id = c.id
-               AND csx.status <> 'deleted'
-               AND (
-                 csx.site_name LIKE ? OR csx.original_customer_name LIKE ?
-                 OR csx.region LIKE ?
-               )
+              SELECT 1 FROM customer_sites csx
+               WHERE csx.customer_id = c.id
+                 AND csx.status <> 'deleted'
+                 AND (csx.site_name LIKE ? OR csx.original_customer_name LIKE ? OR csx.region LIKE ?)
           )
-        )`;
+          ${contactSql}
+        )`);
         params.push(like, like, like, like, like, like);
-        orderClause = `ORDER BY
-          CASE
-            WHEN c.name = ? THEN 0
-            WHEN c.name LIKE ? THEN 1
-            WHEN c.name LIKE ? THEN 2
-            WHEN c.code = ? THEN 3
-            WHEN c.code LIKE ? THEN 4
-            WHEN EXISTS (
-              SELECT 1 FROM customer_sites cso
-               WHERE cso.customer_id = c.id
-                 AND cso.status <> 'deleted'
-                 AND (cso.original_customer_name LIKE ? OR cso.site_name LIKE ?)
-            ) THEN 5
-            ELSE 9
-          END,
-          c.name ASC,
-          c.id ASC`;
-        params.push(q, prefix, like, q, prefix, like, like);
+        if (includeContact) params.push(`%${digits}%`, `%${digits}%`, `%${digits}%`);
       }
 
       const [rows] = await pool.execute(
@@ -311,15 +355,52 @@ function createFinalEnhancementsRouter() {
                  AND cs0.original_customer_name IS NOT NULL
                ORDER BY cs0.id ASC
                LIMIT 1
-            ) AS original_customer_name
+            ) AS original_customer_name,
+            (
+              SELECT GROUP_CONCAT(CONCAT_WS(' ', cs1.site_name, cs1.original_customer_name, cs1.region) SEPARATOR ' ')
+                FROM customer_sites cs1
+               WHERE cs1.customer_id = c.id
+                 AND cs1.status <> 'deleted'
+            ) AS site_search_text,
+            (
+              SELECT cs2.phone
+                FROM customer_sites cs2
+               WHERE cs2.customer_id = c.id
+                 AND cs2.status <> 'deleted'
+                 AND cs2.phone IS NOT NULL
+               ORDER BY cs2.id ASC
+               LIMIT 1
+            ) AS site_phone,
+            (
+              SELECT cs3.business_no
+                FROM customer_sites cs3
+               WHERE cs3.customer_id = c.id
+                 AND cs3.status <> 'deleted'
+                 AND cs3.business_no IS NOT NULL
+               ORDER BY cs3.id ASC
+               LIMIT 1
+            ) AS site_business_no,
+            COALESCE(v.receivable_balance, c.opening_receivable) AS receivable_balance
          FROM customers c
-        WHERE ${where}
-        ${orderClause}
-        LIMIT ${limit}`,
+         LEFT JOIN v_customer_receivable_balance v ON v.customer_id = c.id
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY c.name ASC, c.id ASC
+        LIMIT 240`,
         params
       );
 
-      send(res, rows.map(decorateCustomer));
+      const sorted = rows
+        .map(decorateCustomer)
+        .map((row) => ({ row, score: customerSearchScore(row, q) }))
+        .filter((item) => !q || item.score < 9999)
+        .sort((a, b) => {
+          if (a.score !== b.score) return a.score - b.score;
+          return displayName(a.row).localeCompare(displayName(b.row), 'ko');
+        })
+        .slice(0, limit)
+        .map((item) => item.row);
+
+      send(res, sorted);
     })
   );
 
@@ -343,21 +424,9 @@ function createFinalEnhancementsRouter() {
       }
 
       const limit = Math.min(
-        Math.max(toInt(req.query.limit, q ? 300 : 3000), 1),
+        Math.max(toInt(req.query.limit, q ? 1000 : 10000), 1),
         10000
       );
-      const orderParams = [];
-      const orderCase = q ? `CASE
-            WHEN c.name = ? THEN 0
-            WHEN c.name LIKE ? THEN 1
-            WHEN c.name LIKE ? THEN 2
-            WHEN c.code = ? THEN 3
-            WHEN c.code LIKE ? THEN 4
-            ELSE 9
-          END,` : '';
-      if (q) {
-        orderParams.push(q, `${q}%`, `%${q}%`, q, `${q}%`);
-      }
 
       const [rows] = await pool.execute(
         `SELECT
@@ -401,11 +470,9 @@ function createFinalEnhancementsRouter() {
          LEFT JOIN users u ON u.id = c.sales_rep_id
          LEFT JOIN v_customer_receivable_balance v ON v.customer_id = c.id
         WHERE ${conditions.join(' AND ')}
-        ORDER BY
-          ${orderCase}
-          c.name ASC, c.id ASC
+        ORDER BY c.name ASC, c.id ASC
         LIMIT ${limit}`,
-        params.concat(orderParams)
+        params
       );
 
       send(res, rows.map(decorateCustomer));
