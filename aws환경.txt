@@ -1,0 +1,4 @@
+home
+/var/www/mt-optics
+run
+./deploy/github_update

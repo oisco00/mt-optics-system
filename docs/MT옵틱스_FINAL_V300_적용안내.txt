@@ -1,0 +1,26 @@
+MT옵틱스 FINAL V300 적용안내
+
+1. 로컬 작업 폴더
+   B:\No_Code(Low_Code)\mt-optics-system
+
+2. 이 ZIP 전체를 위 폴더에 덮어쓰기 압축 해제합니다.
+
+3. APPLY_FINAL_ENHANCEMENTS_V300.cmd 실행 후 SUCCESS 문구를 확인합니다.
+
+4. GitHub Desktop에서 Commit / Push origin 합니다.
+   권장 메시지: APPLY_FINAL_ENHANCEMENTS_V300 final stabilization
+
+5. AWS에서 실행합니다.
+   cd /var/www/mt-optics
+   ./deploy/github_update
+
+6. 브라우저에서 Ctrl+F5 새로고침 후 확인합니다.
+
+주요 개선:
+- 카카오 주소검색을 팝업 about:blank 방식이 아닌 화면 내 임베드 방식으로 변경
+- CSP를 주소검색에 맞게 재정비
+- 거래처 자동완성에서 거래처명이 우선 표시되도록 보정
+- 전화번호/사업자번호 하이픈 표준화
+- 주문/수금 기간 종료일은 당일, 시작일은 DB 최저일자로 기본 표시
+- 발송구분별 미수금 조회조건을 수금 조회조건과 분리
+- 최종 파일명과 로더를 V300으로 통일

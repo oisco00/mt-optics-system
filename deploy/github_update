@@ -128,9 +128,19 @@ install_packages() {
 check_javascript() {
   cd "$PROJECT_DIR"
   node --check "$APP_ENTRY"
+  node --check backend/src/db.js
+  node --check backend/src/excelImport.js
+
+  if [[ -f backend/src/finalEnhancements.js ]]; then
+    node --check backend/src/finalEnhancements.js
+  fi
 
   if [[ -f frontend/app.js ]]; then
     node --check frontend/app.js
+  fi
+
+  if [[ -f frontend/final-enhancements-v300.js ]]; then
+    node --check frontend/final-enhancements-v300.js
   fi
 
   if [[ -f frontend/excel-upload-ui-fix.js ]]; then
@@ -195,7 +205,7 @@ health_check() {
 }
 
 line
-echo "MT Optics GitHub -> AWS Lightsail Update v1.1"
+echo "MT Optics GitHub -> AWS Lightsail Update FINAL V300"
 echo "Project : $PROJECT_DIR"
 echo "Branch  : $BRANCH"
 echo "PM2 app : $PM2_APP"

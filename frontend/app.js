@@ -111,27 +111,69 @@ function addressFields(row = {}) {
     </div>`;
 }
 
+function loadDaumPostcodeScript() {
+  if (window.daum?.Postcode) return Promise.resolve();
+  if (window.__mtDaumPostcodeLoading) return window.__mtDaumPostcodeLoading;
+  window.__mtDaumPostcodeLoading = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('주소검색 스크립트를 불러오지 못했습니다.'));
+    document.head.appendChild(script);
+  });
+  return window.__mtDaumPostcodeLoading;
+}
+
+function closePostcodeLayer() {
+  document.getElementById('mt-postcode-layer')?.remove();
+}
+
+async function openPostcodeLayer(block) {
+  await loadDaumPostcodeScript();
+  if (!window.daum?.Postcode) throw new Error('주소검색 서비스를 사용할 수 없습니다.');
+  closePostcodeLayer();
+  const layer = document.createElement('div');
+  layer.id = 'mt-postcode-layer';
+  layer.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:20px;';
+  layer.innerHTML = '<div style="width:min(560px,96vw);height:min(620px,90vh);background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.35);display:flex;flex-direction:column;overflow:hidden"><div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid #e2e8f0;font-weight:800"><span>주소검색</span><button type="button" class="secondary" data-close-postcode>닫기</button></div><div style="flex:1;min-height:420px" data-postcode-body></div></div>';
+  document.body.appendChild(layer);
+  layer.querySelector('[data-close-postcode]').addEventListener('click', closePostcodeLayer);
+  layer.addEventListener('click', (event) => { if (event.target === layer) closePostcodeLayer(); });
+  new window.daum.Postcode({
+    width: '100%',
+    height: '100%',
+    oncomplete(data) {
+      const selectedType = data.userSelectedType === 'J' ? 'J' : 'R';
+      block.querySelector('[name="postal_code"]').value = data.zonecode || '';
+      block.querySelector('[name="road_address"]').value = data.roadAddress || '';
+      block.querySelector('[name="jibun_address"]').value = data.jibunAddress || data.autoJibunAddress || '';
+      block.querySelector('[name="address_type"]').value = selectedType;
+      block.querySelector('[name="address"]').value = selectedType === 'J'
+        ? (data.jibunAddress || data.autoJibunAddress || data.roadAddress || '')
+        : (data.roadAddress || data.jibunAddress || '');
+      closePostcodeLayer();
+      setTimeout(() => block.querySelector('[name="detail_address"]')?.focus(), 30);
+    }
+  }).embed(layer.querySelector('[data-postcode-body]'));
+}
+
 function bindAddressSearch(scope = modalRoot) {
   scope.querySelectorAll('.address-search-btn').forEach((button) => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       const block = button.closest('.address-block');
-      if (!window.daum?.Postcode) {
-        showToast('주소검색 서비스를 불러오지 못했습니다. 인터넷 연결을 확인하세요.', 'error');
-        return;
+      if (!block) return;
+      const oldText = button.textContent;
+      button.disabled = true;
+      button.textContent = '주소검색 준비...';
+      try {
+        await openPostcodeLayer(block);
+      } catch (error) {
+        showToast(error.message, 'error');
+      } finally {
+        button.disabled = false;
+        button.textContent = oldText;
       }
-      new window.daum.Postcode({
-        oncomplete(data) {
-          const selectedType = data.userSelectedType === 'J' ? 'J' : 'R';
-          block.querySelector('[name="postal_code"]').value = data.zonecode || '';
-          block.querySelector('[name="road_address"]').value = data.roadAddress || '';
-          block.querySelector('[name="jibun_address"]').value = data.jibunAddress || data.autoJibunAddress || '';
-          block.querySelector('[name="address_type"]').value = selectedType;
-          block.querySelector('[name="address"]').value = selectedType === 'J'
-            ? (data.jibunAddress || data.autoJibunAddress || data.roadAddress || '')
-            : (data.roadAddress || data.jibunAddress || '');
-          block.querySelector('[name="detail_address"]').focus();
-        }
-      }).open();
     });
   });
 }
@@ -915,5 +957,5 @@ const renderers = {
 // MT_OPTICS_UPLOAD_UI_LOADER_V157
 import("/excel-upload-ui-fix.js?v=157").catch(console.error);
 
-// MT_OPTICS_FINAL_FEATURES_LOADER_V211
-import("/final-enhancements-v210.js?v=211").catch(console.error);
+// APPLY_FINAL_ENHANCEMENTS_V300_LOADER
+import("/final-enhancements-v300.js?v=300").catch(console.error);

@@ -10,6 +10,34 @@ function clean(value) {
   return s;
 }
 
+
+function onlyDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function formatBusinessNo(value) {
+  const raw = clean(value);
+  if (!raw) return null;
+  const digits = onlyDigits(raw);
+  if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+  return raw;
+}
+
+function formatPhoneNumber(value) {
+  const raw = clean(value);
+  if (!raw) return null;
+  const digits = onlyDigits(raw);
+  if (!digits) return raw;
+  if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  if (digits.startsWith('02')) {
+    if (digits.length === 9) return `02-${digits.slice(2, 5)}-${digits.slice(5)}`;
+    if (digits.length === 10) return `02-${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  return raw;
+}
+
 function valueOf(row, aliases) {
   for (const alias of aliases) {
     if (Object.prototype.hasOwnProperty.call(row || {}, alias) && clean(row[alias]) !== null) return row[alias];
@@ -172,9 +200,9 @@ async function upsertCustomer(conn, payload, userId) {
   const updateData = {
     code: code || undefined,
     name,
-    business_no: clean(payload.business_no) || undefined,
-    phone: clean(payload.phone) || undefined,
-    mobile: clean(payload.mobile) || undefined,
+    business_no: formatBusinessNo(payload.business_no) || undefined,
+    phone: formatPhoneNumber(payload.phone) || undefined,
+    mobile: formatPhoneNumber(payload.mobile) || undefined,
     address: clean(payload.address) || clean(payload.road_address) || clean(payload.jibun_address) || undefined,
     postal_code: clean(payload.postal_code) || undefined,
     road_address: clean(payload.road_address) || undefined,
@@ -189,7 +217,7 @@ async function upsertCustomer(conn, payload, userId) {
 
   if (rows.length === 0) {
     const fields = ['code', 'name', 'business_no', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'opening_receivable', 'memo', 'created_by', 'updated_by'];
-    const values = [code, name, clean(payload.business_no), clean(payload.phone), clean(payload.mobile), clean(payload.address) || clean(payload.road_address) || clean(payload.jibun_address), clean(payload.postal_code), clean(payload.road_address), clean(payload.jibun_address), clean(payload.detail_address), clean(payload.address_type), clean(payload.region), toNumber(payload.opening_receivable), updateData.memo || null, userId || null, userId || null];
+    const values = [code, name, formatBusinessNo(payload.business_no), formatPhoneNumber(payload.phone), formatPhoneNumber(payload.mobile), clean(payload.address) || clean(payload.road_address) || clean(payload.jibun_address), clean(payload.postal_code), clean(payload.road_address), clean(payload.jibun_address), clean(payload.detail_address), clean(payload.address_type), clean(payload.region), toNumber(payload.opening_receivable), updateData.memo || null, userId || null, userId || null];
     const [result] = await conn.execute(`INSERT INTO customers(${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`, values);
     const after = await getRecord(conn, 'customers', result.insertId);
     await writeAudit(conn, 'customers', result.insertId, 'IMPORT', null, after, userId);
@@ -236,9 +264,9 @@ async function upsertCustomerSite(conn, payload, userId) {
     site_code: siteCode,
     site_name: siteName,
     original_customer_name: stripLeadingCustomerPrefix(payload.name),
-    business_no: clean(payload.business_no),
-    phone: clean(payload.phone),
-    mobile: clean(payload.mobile),
+    business_no: formatBusinessNo(payload.business_no),
+    phone: formatPhoneNumber(payload.phone),
+    mobile: formatPhoneNumber(payload.mobile),
     address: clean(payload.address) || clean(payload.road_address) || clean(payload.jibun_address),
     postal_code: clean(payload.postal_code),
     road_address: clean(payload.road_address),

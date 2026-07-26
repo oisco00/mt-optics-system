@@ -55,6 +55,117 @@ function createFinalEnhancementsRouter() {
     return raw;
   }
 
+
+  function onlyDigits(value) {
+    return String(value || '').replace(/\D/g, '');
+  }
+
+  function formatBusinessNo(value) {
+    const raw = clean(value);
+    if (!raw) return null;
+    const digits = onlyDigits(raw);
+    if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+    return raw;
+  }
+
+  function formatPhoneNumber(value) {
+    const raw = clean(value);
+    if (!raw) return null;
+    const digits = onlyDigits(raw);
+    if (!digits) return raw;
+    if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+    if (digits.startsWith('02')) {
+      if (digits.length === 9) return `02-${digits.slice(2, 5)}-${digits.slice(5)}`;
+      if (digits.length === 10) return `02-${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+    if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+    if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+    return raw;
+  }
+
+  function looksLikeIdentifierName(value) {
+    const text = clean(value);
+    if (!text) return true;
+    const digits = onlyDigits(text);
+    if (digits.length >= 8 && text.replace(/[0-9\-\s().]/g, '').length === 0) return true;
+    if (/^[0-9\-\s]+$/.test(text)) return true;
+    return false;
+  }
+
+  function displayCustomerName(row) {
+    const candidates = [
+      row?.customer_name,
+      row?.name,
+      row?.original_customer_name,
+      row?.site_name && !['기본', '기타'].includes(String(row.site_name)) ? row.site_name : null,
+      row?.code ? `거래처 ${row.code}` : null,
+      row?.customer_code ? `거래처 ${row.customer_code}` : null,
+      row?.id ? `거래처-${row.id}` : null,
+      row?.customer_id ? `거래처-${row.customer_id}` : null
+    ];
+    for (const value of candidates) {
+      const repaired = repairMojibake(value || '').trim();
+      if (repaired && !looksLikeIdentifierName(repaired)) return repaired;
+    }
+    return clean(candidates.find(Boolean)) || '거래처명 미등록';
+  }
+
+  function decorateContactRow(row) {
+    if (!row) return row;
+    const phone = formatPhoneNumber(row.phone);
+    const mobile = formatPhoneNumber(row.mobile);
+    const businessNo = formatBusinessNo(row.business_no);
+    return {
+      ...row,
+      phone,
+      mobile,
+      business_no: businessNo,
+      phone_display: phone || '',
+      mobile_display: mobile || '',
+      business_no_display: businessNo || '',
+      name: row.name ? repairMojibake(row.name) : row.name,
+      customer_name: displayCustomerName(row),
+      display_name: displayCustomerName(row)
+    };
+  }
+
+  function decorateCustomer(row) {
+    return decorateContactRow(row);
+  }
+
+  function decorateSite(row) {
+    const decorated = decorateContactRow(row);
+    return {
+      ...decorated,
+      site_name: repairMojibake(row.site_name || ''),
+      original_customer_name: repairMojibake(row.original_customer_name || '')
+    };
+  }
+
+  function decorateOrder(row) {
+    return {
+      ...row,
+      customer_name: displayCustomerName(row),
+      site_name: repairMojibake(row.site_name || '')
+    };
+  }
+
+  function decoratePayment(row) {
+    return {
+      ...row,
+      customer_name: displayCustomerName(row),
+      site_name: repairMojibake(row.site_name || '')
+    };
+  }
+
+  function decorateReceivable(row) {
+    return {
+      ...row,
+      customer_name: displayCustomerName(row),
+      site_name: repairMojibake(row.site_name || '')
+    };
+  }
+
   function hasPermission(user, code) {
     if (!user) return false;
     if (user.role_name === 'admin') return true;
@@ -187,6 +298,15 @@ function createFinalEnhancementsRouter() {
       const [rows] = await pool.execute(
         `SELECT
             c.*,
+            (
+              SELECT cs.original_customer_name
+                FROM customer_sites cs
+               WHERE cs.customer_id = c.id
+                 AND cs.original_customer_name IS NOT NULL
+                 AND cs.original_customer_name <> ''
+               ORDER BY cs.id
+               LIMIT 1
+            ) AS original_customer_name,
             u.full_name AS sales_rep_name,
             COALESCE(v.receivable_balance, c.opening_receivable) AS receivable_balance,
             (
@@ -222,7 +342,7 @@ function createFinalEnhancementsRouter() {
         params
       );
 
-      send(res, rows);
+      send(res, rows.map(decorateCustomer));
     })
   );
 
@@ -266,7 +386,7 @@ function createFinalEnhancementsRouter() {
         params
       );
 
-      send(res, rows);
+      send(res, rows.map(decorateSite));
     })
   );
 
@@ -361,6 +481,7 @@ function createFinalEnhancementsRouter() {
             c.code AS customer_code,
             cs.site_name,
             cs.region,
+            cs.original_customer_name,
             u.full_name AS created_by_name,
             COUNT(oi.id) AS item_count,
             COALESCE(
@@ -379,7 +500,7 @@ function createFinalEnhancementsRouter() {
         params
       );
 
-      send(res, rows);
+      send(res, rows.map(decorateOrder));
     })
   );
 
@@ -449,7 +570,7 @@ function createFinalEnhancementsRouter() {
             LIMIT ${limit}`,
           params
         );
-        send(res, rows);
+        send(res, rows.map(decorateReceivable));
         return;
       }
 
@@ -459,6 +580,7 @@ function createFinalEnhancementsRouter() {
         `SELECT
             customer_id,
             MAX(customer_name) AS customer_name,
+            MAX(original_customer_name) AS original_customer_name,
             CASE
               WHEN COUNT(DISTINCT COALESCE(customer_site_id, 0)) = 1
               THEN MAX(customer_site_id)
@@ -488,7 +610,7 @@ function createFinalEnhancementsRouter() {
         params
       );
 
-      send(res, rows);
+      send(res, rows.map(decorateReceivable));
     })
   );
 
@@ -540,6 +662,7 @@ function createFinalEnhancementsRouter() {
             c.name AS customer_name,
             cs.site_name,
             cs.region,
+            cs.original_customer_name,
             u.full_name AS collector_name
          FROM payments p
          JOIN customers c ON c.id = p.customer_id
@@ -556,7 +679,7 @@ function createFinalEnhancementsRouter() {
         rows.map((row) => {
           const memo = repairMojibake(row.memo);
           const approvalNo = repairMojibake(row.approval_no);
-          return {
+          return decoratePayment({
             ...row,
             memo,
             approval_no: approvalNo,
@@ -565,9 +688,29 @@ function createFinalEnhancementsRouter() {
               approvalNo,
               memo
             })
-          };
+          });
         })
       );
+    })
+  );
+
+
+  router.get(
+    '/date-bounds',
+    requirePermission('dashboard.view'),
+    asyncRoute(async (req, res) => {
+      const pool = await getPool();
+      const [[row]] = await pool.query(`SELECT
+          DATE_FORMAT(COALESCE((SELECT MIN(order_date) FROM sales_orders WHERE deleted_at IS NULL), CURDATE()), '%Y-%m-%d') AS min_order_date,
+          DATE_FORMAT(COALESCE((SELECT MIN(payment_date) FROM payments WHERE deleted_at IS NULL), CURDATE()), '%Y-%m-%d') AS min_payment_date,
+          DATE_FORMAT(COALESCE((SELECT MIN(txn_date) FROM receivable_transactions), CURDATE()), '%Y-%m-%d') AS min_receivable_date,
+          DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today_date`);
+      send(res, {
+        min_order_date: row.min_order_date,
+        min_payment_date: row.min_payment_date,
+        min_receivable_date: row.min_receivable_date,
+        today_date: row.today_date
+      });
     })
   );
 
@@ -1011,6 +1154,41 @@ function createFinalEnhancementsRouter() {
           scanned: importedPayments.length,
           updated: normalizedPayments
         });
+
+        let contactFormatsUpdated = 0;
+        for (const tableName of ['customers', 'customer_sites']) {
+          const [rows] = await conn.query(
+            `SELECT id, business_no, phone, mobile
+               FROM ${tableName}
+              LIMIT 50000`
+          );
+          for (const row of rows) {
+            const updates = [];
+            const values = [];
+            const phone = formatPhoneNumber(row.phone);
+            const mobile = formatPhoneNumber(row.mobile);
+            const businessNo = formatBusinessNo(row.business_no);
+            if (phone !== row.phone) { updates.push('phone = ?'); values.push(phone); }
+            if (mobile !== row.mobile) { updates.push('mobile = ?'); values.push(mobile); }
+            if (businessNo !== row.business_no) { updates.push('business_no = ?'); values.push(businessNo); }
+            if (updates.length) {
+              await conn.execute(
+                `UPDATE ${tableName} SET ${updates.join(', ')} WHERE id = ?`,
+                values.concat(row.id)
+              );
+              updated += 1;
+              contactFormatsUpdated += 1;
+            }
+          }
+        }
+
+        details.push({
+          table: 'customers/customer_sites',
+          column: 'phone_business_format',
+          scanned: 0,
+          updated: contactFormatsUpdated
+        });
+
 
         return { scanned, updated, details };
       });

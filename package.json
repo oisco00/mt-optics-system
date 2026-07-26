@@ -1,8 +1,8 @@
 {
   "name": "mt-optics-workflow",
-  "version": "1.5.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "MT옵틱스 주문·수금·생산·재고 통합 웹앱 v1.5 (모바일·주소검색·감사이력·엑셀 업로드)",
+  "description": "MT옵틱스 주문·수금·생산·재고 통합 웹앱 V300 (주소검색·연락처·미수금 최종정리)",
   "workspaces": [
     "backend"
   ],
@@ -11,7 +11,7 @@
     "start": "npm --workspace backend start",
     "build": "echo \"Frontend is static. Nothing to build.\"",
     "seed:sample": "npm --workspace backend run seed:sample",
-    "check": "node --check backend/src/app.js && node --check backend/src/db.js && node --check backend/src/server.js && node --check backend/src/sampleData.js && node --check backend/src/excelImport.js && node --check tools/import-excel.js && node --check netlify/functions/api.js && node --check frontend/app.js",
+    "check": "node --check backend/src/app.js && node --check backend/src/db.js && node --check backend/src/server.js && node --check backend/src/sampleData.js && node --check backend/src/excelImport.js && node --check tools/import-excel.js && node --check netlify/functions/api.js && node --check frontend/app.js && node --check frontend/final-enhancements-v300.js",
     "import:excel": "node tools/import-excel.js",
     "preflight": "node deploy/preflight.js"
   },

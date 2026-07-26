@@ -6,7 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const { initDb, closeDb, getPool, withTransaction, permissions: permissionSeed } = require('./db');
 const { importExcelBuffer } = require('./excelImport');
-const { normalizeUploadedFileName: normalizeUploadedFileNameV211 } = require('./textEncoding');
+const { normalizeUploadedFileName: normalizeUploadedFileNameV300 } = require('./textEncoding');
 
 const { createFinalEnhancementsRouter } = require('./finalEnhancements');
 
@@ -15,6 +15,7 @@ const api = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-long-random-secret';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
 // MT_OPTICS_UPLOAD_FIX_V152
+// APPLY_FINAL_ENHANCEMENTS_V300
 const MAX_EXCEL_FILE_MB = Math.max(Number(process.env.MAX_EXCEL_FILE_MB || 100), 1);
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -47,7 +48,20 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' https://t1.daumcdn.net https://postcode.map.daum.net 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; frame-src https://postcode.map.daum.net; object-src 'none'; base-uri 'self'; form-action 'self'");
+  const postcodeCsp = [
+    "default-src 'self' https: data: blob:",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:",
+    "style-src 'self' 'unsafe-inline' https:",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data: https:",
+    "connect-src 'self' https:",
+    "frame-src 'self' https: data: blob:",
+    "child-src 'self' https: data: blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'"
+  ].join('; ');
+  res.setHeader('Content-Security-Policy', postcodeCsp);
   next();
 });
 app.use(express.json({ limit: '3mb' }));
@@ -142,6 +156,33 @@ function clean(value) {
   if (value === undefined || value === null) return null;
   const trimmed = String(value).trim();
   return trimmed === '' ? null : trimmed;
+}
+
+function onlyDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function formatBusinessNo(value) {
+  const raw = clean(value);
+  if (!raw) return null;
+  const digits = onlyDigits(raw);
+  if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+  return raw;
+}
+
+function formatPhoneNumber(value) {
+  const raw = clean(value);
+  if (!raw) return null;
+  const digits = onlyDigits(raw);
+  if (!digits) return raw;
+  if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  if (digits.startsWith('02')) {
+    if (digits.length === 9) return `02-${digits.slice(2, 5)}-${digits.slice(5)}`;
+    if (digits.length === 10) return `02-${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  return raw;
 }
 
 /** multipart 업로드 과정에서 latin1로 잘못 해석된 한글 파일명을 UTF-8로 복구합니다. */
@@ -310,7 +351,13 @@ function normalizeCustomerSitePayload(body) {
   for (const key of ['site_code', 'site_name', 'original_customer_name', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'default_delivery_group', 'status', 'memo']) {
     if (Object.prototype.hasOwnProperty.call(data, key)) data[key] = clean(data[key]);
   }
+  if (Object.prototype.hasOwnProperty.call(data, 'business_no')) data.business_no = formatBusinessNo(data.business_no);
+  if (Object.prototype.hasOwnProperty.call(data, 'phone')) data.phone = formatPhoneNumber(data.phone);
+  if (Object.prototype.hasOwnProperty.call(data, 'mobile')) data.mobile = formatPhoneNumber(data.mobile);
   if (Object.prototype.hasOwnProperty.call(data, 'default_delivery_type')) data.default_delivery_type = normalizeDeliveryType(data.default_delivery_type);
+  if (Object.prototype.hasOwnProperty.call(data, 'business_no')) data.business_no = formatBusinessNo(data.business_no);
+  if (Object.prototype.hasOwnProperty.call(data, 'phone')) data.phone = formatPhoneNumber(data.phone);
+  if (Object.prototype.hasOwnProperty.call(data, 'mobile')) data.mobile = formatPhoneNumber(data.mobile);
   if (Object.prototype.hasOwnProperty.call(data, 'sales_rep_id')) data.sales_rep_id = data.sales_rep_id ? toInt(data.sales_rep_id) : null;
   if (Object.prototype.hasOwnProperty.call(data, 'opening_receivable')) data.opening_receivable = toMoney(data.opening_receivable);
   if (Object.prototype.hasOwnProperty.call(data, 'credit_limit')) data.credit_limit = toMoney(data.credit_limit);
@@ -515,7 +562,7 @@ api.post('/auth/login', loginLimiter, asyncHandler(async (req, res) => {
 
 api.use(authRequired);
 
-// MT_OPTICS_FINAL_BACKEND_V211
+// APPLY_FINAL_ENHANCEMENTS_V300_BACKEND
 api.use('/final', createFinalEnhancementsRouter());
 
 api.get('/auth/me', asyncHandler(async (req, res) => {
@@ -699,7 +746,7 @@ api.post('/imports/excel', requirePermission('imports.manage'), upload.array('fi
     }
     const result = await importExcelBuffer(pool, {
       buffer: file.buffer,
-      fileName: normalizeUploadedFileNameV211(file.originalname),
+      fileName: normalizeUploadedFileNameV300(file.originalname),
       importedBy: req.user.id,
       auditUserId: req.user.id
     });

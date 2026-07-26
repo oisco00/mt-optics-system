@@ -1,6 +1,6 @@
-// MT_OPTICS_FINAL_FEATURES_V210
+// APPLY_FINAL_ENHANCEMENTS_V300
 (() => {
-  const VERSION = '2.1.0';
+  const VERSION = '3.0.0';
   const API_BASE = localStorage.getItem('mt_api_base') || '/api';
   const cache = {
     user: null,
@@ -26,10 +26,17 @@
       customer_id: '',
       site_id: '',
       delivery_type: '',
-      date_from: monthAgo(),
-      date_to: today()
+      date_from: '',
+      date_to: ''
     },
-    paymentReceivablesLoaded: false
+    receivableFilters: {
+      customer_q: '',
+      customer_id: '',
+      site_id: '',
+      delivery_type: ''
+    },
+    receivablesLoaded: false,
+    dateBounds: null
   };
 
   let renderTimer = null;
@@ -163,6 +170,66 @@
     return current.normalize('NFC');
   }
 
+
+  function onlyDigits(value) {
+    return String(value || '').replace(/\D/g, '');
+  }
+
+  function formatBusinessNo(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const digits = onlyDigits(raw);
+    if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+    return raw;
+  }
+
+  function formatPhoneNumber(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const digits = onlyDigits(raw);
+    if (!digits) return raw;
+    if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+    if (digits.startsWith('02')) {
+      if (digits.length === 9) return `02-${digits.slice(2, 5)}-${digits.slice(5)}`;
+      if (digits.length === 10) return `02-${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+    if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+    if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+    return raw;
+  }
+
+  function looksLikeIdentifierName(value) {
+    const text = String(value || '').trim();
+    if (!text) return true;
+    const digits = onlyDigits(text);
+    return digits.length >= 8 && text.replace(/[0-9\-\s().]/g, '').length === 0;
+  }
+
+  function displayCustomerName(row) {
+    const candidates = [
+      row?.display_name,
+      row?.customer_name,
+      row?.name,
+      row?.original_customer_name,
+      row?.site_name && !['기본', '기타'].includes(String(row.site_name)) ? row.site_name : null,
+      row?.code ? `거래처 ${row.code}` : null,
+      row?.customer_code ? `거래처 ${row.customer_code}` : null
+    ];
+    for (const value of candidates) {
+      const repaired = repairMojibake(value || '').trim();
+      if (repaired && !looksLikeIdentifierName(repaired)) return repaired;
+    }
+    return '거래처명 미등록';
+  }
+
+  function contactText(row) {
+    return [
+      row?.region,
+      formatPhoneNumber(row?.phone || row?.phone_display || row?.mobile || row?.mobile_display),
+      formatBusinessNo(row?.business_no || row?.business_no_display)
+    ].filter(Boolean).join(' · ');
+  }
+
   function statusBadge(status) {
     const map = {
       active: ['사용', 'green'],
@@ -258,10 +325,10 @@
   }
 
   function injectStyles() {
-    if (document.getElementById('mt-final-styles-v210')) return;
+    if (document.getElementById('mt-final-styles-v300')) return;
 
     const style = document.createElement('style');
-    style.id = 'mt-final-styles-v210';
+    style.id = 'mt-final-styles-v300';
     style.textContent = `
       .mtf-root{display:grid;gap:18px}
       .mtf-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
@@ -328,6 +395,11 @@
       .mtf-ac-item{display:block;width:100%;border:0;border-bottom:1px solid #f1f5f9;background:#fff;text-align:left;padding:9px 11px;cursor:pointer}
       .mtf-ac-item:hover,.mtf-ac-item.active{background:#eff6ff}
       .mtf-ac-item:last-child{border-bottom:0}
+      .mtf-ac-item strong{display:block;color:#0f172a;font-weight:800}
+      .mtf-postcode-backdrop{position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:20px}
+      .mtf-postcode-panel{width:min(560px,96vw);height:min(620px,90vh);background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.35);display:flex;flex-direction:column;overflow:hidden}
+      .mtf-postcode-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid #e2e8f0;font-weight:800}
+      .mtf-postcode-body{flex:1;min-height:420px}
       .mtf-items{display:grid;gap:8px}
       .mtf-item-row{display:grid;grid-template-columns:2.2fr 1fr .8fr 1fr auto;gap:8px;align-items:end;padding:10px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc}
       .mtf-selected-bar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:12px 14px}
@@ -528,7 +600,7 @@
           </button>
         </div>
         <div class="mtf-help-tip">
-          기존 자료의 깨진 파일명·비고를 한 번 정리합니다. 앞으로 업로드되는 파일명은 저장 전에 자동 보정합니다.
+          기존 자료의 깨진 파일명·비고와 전화번호·사업자번호 형식을 한 번 정리합니다. 앞으로 업로드·입력되는 연락처도 하이픈 형식으로 통일됩니다.
         </div>
       ` : ''}
     `;
@@ -663,15 +735,19 @@
           .filter((customer) => {
             if (!keyword) return true;
             return [
+              displayCustomerName(customer),
               customer.name,
               customer.code,
-              customer.business_no,
+              formatBusinessNo(customer.business_no || customer.business_no_display),
+              customer.business_no_display,
               customer.region,
               customer.phone,
-              customer.mobile
+              customer.phone_display,
+              customer.mobile,
+              customer.mobile_display
             ].some((value) => normalizeText(value).includes(keyword));
           })
-          .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko'))
+          .sort((a, b) => displayCustomerName(a).localeCompare(displayCustomerName(b), 'ko'))
           .slice(0, 40);
 
         activeIndex = -1;
@@ -679,14 +755,8 @@
           ? matches.map((customer) => `
               <button type="button" class="mtf-ac-item"
                       data-customer-id="${customer.id}">
-                <strong>${escapeHtml(customer.name)}</strong>
-                <span class="mtf-sub">
-                  ${escapeHtml([
-                    customer.region,
-                    customer.phone || customer.mobile,
-                    customer.business_no
-                  ].filter(Boolean).join(' · '))}
-                </span>
+                <strong>${escapeHtml(displayCustomerName(customer))}</strong>
+                <span class="mtf-sub">${escapeHtml(contactText(customer))}</span>
               </button>
             `).join('')
           : `<div class="mtf-empty compact">일치하는 거래처가 없습니다.</div>`;
@@ -695,7 +765,7 @@
       }
 
       function selectCustomer(customer) {
-        input.value = customer?.name || '';
+        input.value = customer ? displayCustomerName(customer) : '';
         hidden.value = customer?.id || '';
         list.hidden = true;
         activeIndex = -1;
@@ -745,7 +815,7 @@
 
         if (event.key === 'Enter') {
           const exact = customers.find(
-            (customer) => normalizeText(customer.name) === normalizeText(input.value)
+            (customer) => normalizeText(displayCustomerName(customer)) === normalizeText(input.value)
           );
           const selected = matches[activeIndex] || exact || (matches.length === 1 ? matches[0] : null);
           if (selected) {
@@ -760,7 +830,7 @@
         setTimeout(() => {
           const exact = customers.find(
             (customer) =>
-              normalizeText(customer.name) === normalizeText(input.value)
+              normalizeText(displayCustomerName(customer)) === normalizeText(input.value)
           );
           if (exact) selectCustomer(exact);
           else if (!input.value.trim()) selectCustomer(null);
@@ -828,37 +898,83 @@
     ].join('');
   }
 
+  function loadDaumPostcodeScript() {
+    if (window.daum?.Postcode) return Promise.resolve();
+    if (window.__mtfDaumPostcodeLoading) return window.__mtfDaumPostcodeLoading;
+    window.__mtfDaumPostcodeLoading = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('카카오 주소검색 스크립트를 불러오지 못했습니다.'));
+      document.head.appendChild(script);
+    });
+    return window.__mtfDaumPostcodeLoading;
+  }
+
+  function closePostcodeLayer() {
+    document.getElementById('mtf-postcode-layer')?.remove();
+  }
+
+  async function openPostcodeLayer(block) {
+    await loadDaumPostcodeScript();
+    if (!window.daum?.Postcode) {
+      throw new Error('주소검색 서비스를 사용할 수 없습니다.');
+    }
+
+    closePostcodeLayer();
+    const layer = document.createElement('div');
+    layer.id = 'mtf-postcode-layer';
+    layer.className = 'mtf-postcode-backdrop';
+    layer.innerHTML = `
+      <div class="mtf-postcode-panel" role="dialog" aria-modal="true">
+        <div class="mtf-postcode-head">
+          <span>주소검색</span>
+          <button type="button" class="mtf-btn small" data-postcode-close>닫기</button>
+        </div>
+        <div class="mtf-postcode-body" data-postcode-body></div>
+      </div>
+    `;
+    document.body.appendChild(layer);
+    layer.querySelector('[data-postcode-close]').addEventListener('click', closePostcodeLayer);
+    layer.addEventListener('click', (event) => {
+      if (event.target === layer) closePostcodeLayer();
+    });
+
+    new window.daum.Postcode({
+      width: '100%',
+      height: '100%',
+      oncomplete(data) {
+        const selectedType = data.userSelectedType === 'J' ? 'J' : 'R';
+        block.querySelector('[name="postal_code"]').value = data.zonecode || '';
+        block.querySelector('[name="road_address"]').value = data.roadAddress || '';
+        block.querySelector('[name="jibun_address"]').value = data.jibunAddress || data.autoJibunAddress || '';
+        block.querySelector('[name="address_type"]').value = selectedType;
+        block.querySelector('[name="address"]').value = selectedType === 'J'
+          ? (data.jibunAddress || data.autoJibunAddress || data.roadAddress || '')
+          : (data.roadAddress || data.jibunAddress || '');
+        closePostcodeLayer();
+        setTimeout(() => block.querySelector('[name="detail_address"]')?.focus(), 30);
+      }
+    }).embed(layer.querySelector('[data-postcode-body]'));
+  }
+
   function bindAddressSearch(scope) {
     scope.querySelectorAll('[data-mtf-address-search]').forEach((button) => {
-      button.addEventListener('click', () => {
+      button.addEventListener('click', async () => {
         const block = button.closest('[data-mtf-address-block]');
-        if (!window.daum?.Postcode) {
-          showToast('주소검색 서비스를 불러오지 못했습니다.', 'error');
-          return;
+        if (!block) return;
+        button.disabled = true;
+        const originalText = button.textContent;
+        button.textContent = '주소검색 준비...';
+        try {
+          await openPostcodeLayer(block);
+        } catch (error) {
+          showToast(error.message, 'error');
+        } finally {
+          button.disabled = false;
+          button.textContent = originalText;
         }
-
-        new window.daum.Postcode({
-          oncomplete(data) {
-            const selectedType = data.userSelectedType === 'J' ? 'J' : 'R';
-            block.querySelector('[name="postal_code"]').value =
-              data.zonecode || '';
-            block.querySelector('[name="road_address"]').value =
-              data.roadAddress || '';
-            block.querySelector('[name="jibun_address"]').value =
-              data.jibunAddress || data.autoJibunAddress || '';
-            block.querySelector('[name="address_type"]').value = selectedType;
-            block.querySelector('[name="address"]').value =
-              selectedType === 'J'
-                ? (
-                    data.jibunAddress ||
-                    data.autoJibunAddress ||
-                    data.roadAddress ||
-                    ''
-                  )
-                : (data.roadAddress || data.jibunAddress || '');
-            block.querySelector('[name="detail_address"]').focus();
-          }
-        }).open();
       });
     });
   }
@@ -920,7 +1036,7 @@
           <div class="mtf-field">
             <label>사업자번호</label>
             <input class="mtf-input" name="business_no"
-                   value="${escapeHtml(row?.business_no || '')}">
+                   value="${escapeHtml(formatBusinessNo(row?.business_no || row?.business_no_display || ''))}">
           </div>
           <div class="mtf-field">
             <label>대표자/성명</label>
@@ -930,12 +1046,12 @@
           <div class="mtf-field">
             <label>전화</label>
             <input class="mtf-input" name="phone"
-                   value="${escapeHtml(row?.phone || '')}">
+                   value="${escapeHtml(formatPhoneNumber(row?.phone || row?.phone_display || ''))}">
           </div>
           <div class="mtf-field">
             <label>휴대폰</label>
             <input class="mtf-input" name="mobile"
-                   value="${escapeHtml(row?.mobile || '')}">
+                   value="${escapeHtml(formatPhoneNumber(row?.mobile || row?.mobile_display || ''))}">
           </div>
           <div class="mtf-field">
             <label>지역</label>
@@ -1060,7 +1176,7 @@
                       <td>${escapeHtml(site.site_name)}</td>
                       <td>${escapeHtml(site.region || '')}</td>
                       <td>${escapeHtml(site.default_delivery_type || '')}</td>
-                      <td>${escapeHtml(site.phone || site.mobile || '')}</td>
+                      <td>${escapeHtml(formatPhoneNumber(site.phone || site.phone_display || site.mobile || site.mobile_display) || '')}</td>
                       <td>${escapeHtml(site.address || '')}</td>
                       <td>${money(site.receivable_balance)}원</td>
                       <td>${statusBadge(site.status)}</td>
@@ -1137,12 +1253,12 @@
           <div class="mtf-field">
             <label>전화</label>
             <input class="mtf-input" name="phone"
-                   value="${escapeHtml(row?.phone || '')}">
+                   value="${escapeHtml(formatPhoneNumber(row?.phone || row?.phone_display || ''))}">
           </div>
           <div class="mtf-field">
             <label>휴대폰</label>
             <input class="mtf-input" name="mobile"
-                   value="${escapeHtml(row?.mobile || '')}">
+                   value="${escapeHtml(formatPhoneNumber(row?.mobile || row?.mobile_display || ''))}">
           </div>
           <div class="mtf-field">
             <label>초기미수금</label>
@@ -1203,7 +1319,7 @@
     );
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="customers-v210">
+      <div class="mtf-root" data-mtf-view="customers-v300">
         <div class="mtf-head">
           <div><h1>거래처/원장</h1></div>
           <div class="mtf-actions">
@@ -1251,14 +1367,14 @@
                           class="${String(customer.id) === String(uiState.highlightCustomerId) ? 'mtf-highlight' : ''}">
                         <td>${index + 1}</td>
                         <td>
-                          <strong>${escapeHtml(customer.name)}</strong>
+                          <strong>${escapeHtml(displayCustomerName(customer))}</strong>
                           <span class="mtf-sub">${escapeHtml([
                             customer.region,
-                            customer.business_no
+                            formatBusinessNo(customer.business_no || customer.business_no_display)
                           ].filter(Boolean).join(' · '))}</span>
                         </td>
                         <td>${money(customer.site_count || 0)}곳</td>
-                        <td>${escapeHtml(customer.phone || customer.mobile || '')}</td>
+                        <td>${escapeHtml(formatPhoneNumber(customer.phone || customer.phone_display || customer.mobile || customer.mobile_display) || '')}</td>
                         <td><strong>${money(customer.receivable_balance)}원</strong></td>
                         <td>
                           택배 ${money(customer.parcel_receivable)} /
@@ -1363,6 +1479,24 @@
     }
   }
 
+
+  async function loadDateBounds(force = false) {
+    if (!uiState.dateBounds || force) {
+      uiState.dateBounds = await api('/final/date-bounds');
+    }
+    return uiState.dateBounds;
+  }
+
+  function applyDefaultOrderDates(bounds) {
+    if (!uiState.orderFilters.date_from) uiState.orderFilters.date_from = bounds?.min_order_date || '1900-01-01';
+    if (!uiState.orderFilters.date_to) uiState.orderFilters.date_to = bounds?.today_date || today();
+  }
+
+  function applyDefaultPaymentDates(bounds) {
+    if (!uiState.paymentFilters.date_from) uiState.paymentFilters.date_from = bounds?.min_payment_date || bounds?.min_receivable_date || '1900-01-01';
+    if (!uiState.paymentFilters.date_to) uiState.paymentFilters.date_to = bounds?.today_date || today();
+  }
+
   function orderFilterQuery() {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(uiState.orderFilters)) {
@@ -1374,6 +1508,8 @@
   async function renderOrders(el) {
     if (!el) return;
     const token = ++activeRenderToken;
+    const bounds = await loadDateBounds();
+    applyDefaultOrderDates(bounds);
     const [rows, customers] = await Promise.all([
       api(`/final/orders?${orderFilterQuery()}`),
       loadCustomers()
@@ -1390,7 +1526,7 @@
     );
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="orders-v210">
+      <div class="mtf-root" data-mtf-view="orders-v300">
         <div class="mtf-head">
           <div><h1>주문/출고</h1></div>
           <div class="mtf-actions">
@@ -1492,7 +1628,7 @@
                         <td>${fmtDate(order.order_date)}</td>
                         <td>${escapeHtml(order.order_no)}</td>
                         <td>
-                          <strong>${escapeHtml(order.customer_name)}</strong>
+                          <strong>${escapeHtml(displayCustomerName(order))}</strong>
                           <span class="mtf-sub">${escapeHtml(order.site_name || order.region || '')}</span>
                         </td>
                         <td>${escapeHtml(order.delivery_type || order.delivery_method || '')}</td>
@@ -1581,8 +1717,8 @@
     el.querySelector('[data-order-reset]').addEventListener('click', () => {
       uiState.orderFilters = {
         q: '',
-        date_from: '',
-        date_to: '',
+        date_from: uiState.dateBounds?.min_order_date || '1900-01-01',
+        date_to: uiState.dateBounds?.today_date || today(),
         customer_q: '',
         customer_id: '',
         delivery_type: '',
@@ -2109,14 +2245,14 @@
 
   function paymentReceivableQuery() {
     const params = new URLSearchParams();
-    const filters = uiState.paymentFilters;
+    const filters = uiState.receivableFilters;
     if (filters.customer_id) params.set('customer_id', filters.customer_id);
     else if (filters.customer_q) params.set('customer_q', filters.customer_q);
     if (filters.site_id) params.set('site_id', filters.site_id);
     if (filters.delivery_type) params.set('delivery_type', filters.delivery_type);
     params.set('group', 'customer');
-    params.set('require_filter', '1');
-    params.set('limit', '1000');
+    params.set('require_filter', '0');
+    params.set('limit', '1500');
     return params.toString();
   }
 
@@ -2131,15 +2267,6 @@
     if (filters.date_to) params.set('date_to', filters.date_to);
     params.set('limit', '500');
     return params.toString();
-  }
-
-  function hasReceivableFilter() {
-    const filters = uiState.paymentFilters;
-    return Boolean(
-      filters.customer_id ||
-      filters.customer_q ||
-      filters.delivery_type
-    );
   }
 
   function paymentRegistrationHtml() {
@@ -2173,8 +2300,7 @@
             </div>
             <div class="mtf-field">
               <label>수금일</label>
-              <input class="mtf-input" type="date" name="payment_date"
-                     value="${today()}">
+              <input class="mtf-input" type="date" name="payment_date" value="${today()}">
             </div>
             <div class="mtf-field">
               <label>방법</label>
@@ -2187,26 +2313,12 @@
             </div>
             <div class="mtf-field">
               <label>금액 *</label>
-              <input class="mtf-input" type="number" min="1" name="amount"
-                     id="mtf-payment-amount" required inputmode="numeric">
+              <input class="mtf-input" type="number" min="1" name="amount" id="mtf-payment-amount" required inputmode="numeric">
             </div>
-            <div class="mtf-field">
-              <label>카드사/입금은행</label>
-              <input class="mtf-input" name="card_company">
-            </div>
-            <div class="mtf-field">
-              <label>승인번호</label>
-              <input class="mtf-input" name="approval_no">
-            </div>
-            <div class="mtf-field">
-              <label>은행명</label>
-              <input class="mtf-input" name="bank_name">
-            </div>
-            <div class="mtf-field mtf-span-3">
-              <label>비고</label>
-              <textarea class="mtf-textarea" name="memo"
-                        id="mtf-payment-memo"></textarea>
-            </div>
+            <div class="mtf-field"><label>카드사/입금은행</label><input class="mtf-input" name="card_company"></div>
+            <div class="mtf-field"><label>승인번호</label><input class="mtf-input" name="approval_no"></div>
+            <div class="mtf-field"><label>은행명</label><input class="mtf-input" name="bank_name"></div>
+            <div class="mtf-field mtf-span-3"><label>비고</label><textarea class="mtf-textarea" name="memo" id="mtf-payment-memo"></textarea></div>
           </div>
           <div class="mtf-actions" style="margin-top:12px">
             <button type="submit" class="mtf-btn primary">수금 저장</button>
@@ -2219,13 +2331,9 @@
   function bindPaymentRegistration(el, customers) {
     const form = el.querySelector('#mtf-payment-form');
     if (!form) return;
-
     const card = el.querySelector('#mtf-payment-register-card');
     bindCustomerAutocomplete(card, customers);
-
-    const wrapper = card.querySelector(
-      '[data-mtf-ac="mtf-payment-form-customer"]'
-    );
+    const wrapper = card.querySelector('[data-mtf-ac="mtf-payment-form-customer"]');
     const hidden = wrapper.querySelector('[data-mtf-ac-value]');
     const siteSelect = card.querySelector('#mtf-payment-form-site');
     const deliverySelect = card.querySelector('#mtf-payment-form-delivery');
@@ -2239,11 +2347,8 @@
     wrapper.addEventListener('mtf-customer-selected', async (event) => {
       const customer = event.detail;
       currentSites = [];
-      siteSelect.innerHTML = customer
-        ? '<option value="">납품처 불러오는 중...</option>'
-        : '<option value="">거래처를 먼저 선택하세요</option>';
+      siteSelect.innerHTML = customer ? '<option value="">납품처 불러오는 중...</option>' : '<option value="">거래처를 먼저 선택하세요</option>';
       if (!customer) return;
-
       try {
         const rows = await loadCustomerSites(customer.id);
         if (String(hidden.value) !== String(customer.id)) return;
@@ -2260,36 +2365,21 @@
     });
 
     siteSelect.addEventListener('change', () => {
-      const site = currentSites.find(
-        (row) => String(row.id) === String(siteSelect.value)
-      );
-      if (site?.default_delivery_type) {
-        deliverySelect.value = site.default_delivery_type;
-      }
+      const site = currentSites.find((row) => String(row.id) === String(siteSelect.value));
+      if (site?.default_delivery_type) deliverySelect.value = site.default_delivery_type;
     });
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const data = formObject(form);
-      if (!data.customer_id) {
-        showToast('거래처를 선택하세요.', 'error');
-        return;
-      }
-      if (!Number(data.amount || 0)) {
-        showToast('수금 금액을 입력하세요.', 'error');
-        return;
-      }
-
+      if (!data.customer_id) return showToast('거래처를 선택하세요.', 'error');
+      if (!Number(data.amount || 0)) return showToast('수금 금액을 입력하세요.', 'error');
       const button = form.querySelector('button[type="submit"]');
       button.disabled = true;
       button.textContent = '수금 저장 중...';
-
       try {
-        await api('/payments', {
-          method: 'POST',
-          body: JSON.stringify(data)
-        });
-        uiState.paymentReceivablesLoaded = hasReceivableFilter();
+        await api('/payments', { method: 'POST', body: JSON.stringify(data) });
+        uiState.receivablesLoaded = true;
         showToast('수금을 등록했습니다.');
         await renderPayments(el);
       } catch (error) {
@@ -2302,444 +2392,169 @@
 
   async function applyReceivableToPaymentForm(el, row, customers) {
     const form = el.querySelector('#mtf-payment-form');
-    if (!form) {
-      showToast('수금 등록 권한이 없습니다.', 'error');
-      return;
-    }
-
-    const customer = customers.find(
-      (item) => String(item.id) === String(row.customer_id)
-    );
-    const sites = await loadCustomerSites(row.customer_id);
-    const input = form.querySelector('#mtf-payment-form-customer');
-    const hidden = form.querySelector('[name="customer_id"]');
+    if (!form) return showToast('수금 등록 권한이 없습니다.', 'error');
+    const customer = customers.find((item) => String(item.id) === String(row.customer_id));
+    if (!customer) return showToast('거래처 정보를 찾을 수 없습니다.', 'error');
+    const wrapper = form.querySelector('[data-mtf-ac="mtf-payment-form-customer"]');
+    const input = wrapper.querySelector('[data-mtf-ac-input]');
+    const hidden = wrapper.querySelector('[data-mtf-ac-value]');
     const siteSelect = form.querySelector('#mtf-payment-form-site');
     const deliverySelect = form.querySelector('#mtf-payment-form-delivery');
     const amountInput = form.querySelector('#mtf-payment-amount');
     const memoInput = form.querySelector('#mtf-payment-memo');
 
-    input.value = customer?.name || row.customer_name || '';
-    hidden.value = row.customer_id;
-    siteSelect.innerHTML = siteOptions(
-      sites,
-      row.customer_id,
-      row.customer_site_id || ''
-    );
-    if (row.customer_site_id) {
-      siteSelect.value = row.customer_site_id;
-    } else {
-      siteSelect.value = '';
-    }
+    input.value = displayCustomerName(customer);
+    hidden.value = customer.id;
+    const sites = await loadCustomerSites(customer.id);
+    siteSelect.innerHTML = siteOptions(sites, customer.id, row.customer_site_id || '');
+    siteSelect.value = row.customer_site_id || '';
     deliverySelect.value = row.delivery_type || '택배';
     amountInput.value = Math.max(Number(row.receivable_balance || 0), 0);
-    memoInput.value = `미수금 반영 · ${row.delivery_type || '기타'} · ${money(row.receivable_balance)}원`;
-
-    el.querySelector('#mtf-payment-register-card').scrollIntoView({
-      behavior: 'smooth',
-      block: 'start'
-    });
-    requestAnimationFrame(() => {
-      amountInput.focus();
-      amountInput.select?.();
-    });
-    showToast('미수금 금액을 수금 등록란에 반영했습니다.');
+    memoInput.value = `미수금 반영 · ${row.delivery_type || '전체'} · ${money(row.receivable_balance)}원`;
+    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    amountInput.focus();
   }
 
-  async function openPaymentEditModal(payment, customers) {
-    const initialSites = await loadCustomerSites(payment.customer_id);
-    let currentSites = initialSites;
-
-    const modal = openModal(
-      `수금 수정 ${payment.payment_no}`,
-      `
-        <div class="mtf-form-grid">
-          ${customerAutocompleteHtml({
-            id: 'mtf-payment-edit-customer',
-            label: '거래처',
-            value: payment.customer_name,
-            customerId: payment.customer_id,
-            required: true
-          })}
-          <div class="mtf-field">
-            <label>납품처/지역</label>
-            <select class="mtf-select" name="customer_site_id"
-                    id="mtf-payment-edit-site">
-              ${siteOptions(initialSites, payment.customer_id, payment.customer_site_id || '')}
-            </select>
-          </div>
-          <div class="mtf-field">
-            <label>발송구분</label>
-            <select class="mtf-select" name="delivery_type"
-                    id="mtf-payment-edit-delivery">
-              ${['택배', '영업방문', '기타'].map((value) => `
-                <option value="${value}"
-                        ${payment.delivery_type === value ? 'selected' : ''}>
-                  ${value}
-                </option>
-              `).join('')}
-            </select>
-          </div>
-          <div class="mtf-field">
-            <label>수금일</label>
-            <input class="mtf-input" type="date" name="payment_date"
-                   value="${fmtDate(payment.payment_date)}">
-          </div>
-          <div class="mtf-field">
-            <label>방법</label>
-            <select class="mtf-select" name="method">
-              ${[
-                ['card', '카드'],
-                ['bank', '송금'],
-                ['cash', '현금'],
-                ['other', '기타']
-              ].map(([value, label]) => `
-                <option value="${value}"
-                        ${payment.method === value ? 'selected' : ''}>
-                  ${label}
-                </option>
-              `).join('')}
-            </select>
-          </div>
-          <div class="mtf-field">
-            <label>금액 *</label>
-            <input class="mtf-input" type="number" name="amount" required
-                   value="${payment.amount}">
-          </div>
-          <div class="mtf-field">
-            <label>카드사/입금은행</label>
-            <input class="mtf-input" name="card_company"
-                   value="${escapeHtml(payment.card_company || '')}">
-          </div>
-          <div class="mtf-field">
-            <label>승인번호</label>
-            <input class="mtf-input" name="approval_no"
-                   value="${escapeHtml(repairMojibake(payment.approval_no || ''))}">
-          </div>
-          <div class="mtf-field">
-            <label>은행명</label>
-            <input class="mtf-input" name="bank_name"
-                   value="${escapeHtml(payment.bank_name || '')}">
-          </div>
-          <div class="mtf-field mtf-span-3">
-            <label>수정 사유 *</label>
-            <input class="mtf-input" name="change_reason" required>
-          </div>
-          <div class="mtf-field mtf-span-3">
-            <label>비고</label>
-            <textarea class="mtf-textarea" name="memo">${escapeHtml(repairMojibake(payment.memo || ''))}</textarea>
-          </div>
-        </div>
-      `,
-      {
-        submitText: '수정 저장',
-        onSubmit: async (form) => {
-          const data = formObject(form);
-          if (!data.customer_id) throw new Error('거래처를 선택하세요.');
-          await api(`/payments/${payment.id}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-          });
-          closeModal();
-          showToast('수금을 수정했습니다.');
-          await renderPayments(contentElement());
-        }
-      }
-    );
-
-    bindCustomerAutocomplete(modal, customers);
-    const wrapper = modal.querySelector(
-      '[data-mtf-ac="mtf-payment-edit-customer"]'
-    );
-    const hidden = wrapper.querySelector('[data-mtf-ac-value]');
-    const siteSelect = modal.querySelector('#mtf-payment-edit-site');
-    const deliverySelect = modal.querySelector('#mtf-payment-edit-delivery');
-
-    wrapper.querySelector('[data-mtf-ac-input]')?.addEventListener('input', () => {
-      currentSites = [];
-      siteSelect.innerHTML = '<option value="">거래처를 먼저 선택하세요</option>';
+  function bindFilterCustomer({ el, customers, wrapperId, filter, siteSelectId }) {
+    const wrapper = el.querySelector(`[data-mtf-ac="${wrapperId}"]`);
+    const hidden = wrapper?.querySelector('[data-mtf-ac-value]');
+    const siteSelect = el.querySelector(siteSelectId);
+    wrapper?.querySelector('[data-mtf-ac-input]')?.addEventListener('input', () => {
+      filter.customer_id = '';
+      filter.site_id = '';
+      if (siteSelect) siteSelect.innerHTML = '<option value="">거래처를 먼저 선택하세요</option>';
     });
-
-    wrapper.addEventListener('mtf-customer-selected', async (event) => {
+    wrapper?.addEventListener('mtf-customer-selected', async (event) => {
       const customer = event.detail;
-      currentSites = [];
-      siteSelect.innerHTML = customer
-        ? '<option value="">납품처 불러오는 중...</option>'
-        : '<option value="">거래처를 먼저 선택하세요</option>';
+      filter.customer_id = customer?.id || '';
+      filter.customer_q = customer ? displayCustomerName(customer) : '';
+      filter.site_id = '';
+      if (!siteSelect) return;
+      siteSelect.innerHTML = customer ? '<option value="">납품처 불러오는 중...</option>' : '<option value="">거래처를 먼저 선택하세요</option>';
       if (!customer) return;
       try {
         const rows = await loadCustomerSites(customer.id);
-        if (String(hidden.value) !== String(customer.id)) return;
-        currentSites = rows;
+        if (String(hidden?.value || '') !== String(customer.id)) return;
         siteSelect.innerHTML = siteOptions(rows, customer.id);
-        if (rows.length === 1) {
-          siteSelect.value = rows[0].id;
-          deliverySelect.value = rows[0].default_delivery_type || '택배';
-        }
       } catch (error) {
         showToast(error.message, 'error');
       }
     });
-
-    siteSelect.addEventListener('change', () => {
-      const site = currentSites.find(
-        (row) => String(row.id) === String(siteSelect.value)
-      );
-      if (site?.default_delivery_type) {
-        deliverySelect.value = site.default_delivery_type;
-      }
-    });
+    return { wrapper, hidden, siteSelect };
   }
 
   async function renderPayments(el) {
     if (!el) return;
     const token = ++activeRenderToken;
-    const customerId = uiState.paymentFilters.customer_id;
-
-    const [customers, filterSites, receivables, payments] = await Promise.all([
-      loadCustomers(),
-      customerId ? loadCustomerSites(customerId) : Promise.resolve([]),
-      uiState.paymentReceivablesLoaded && hasReceivableFilter()
-        ? api(`/final/receivables?${paymentReceivableQuery()}`)
-        : Promise.resolve([]),
+    const bounds = await loadDateBounds();
+    applyDefaultPaymentDates(bounds);
+    const customers = await loadCustomers();
+    const paymentCustomerId = uiState.paymentFilters.customer_id;
+    const receivableCustomerId = uiState.receivableFilters.customer_id;
+    const [paymentSites, receivableSites, receivables, payments] = await Promise.all([
+      paymentCustomerId ? loadCustomerSites(paymentCustomerId) : Promise.resolve([]),
+      receivableCustomerId ? loadCustomerSites(receivableCustomerId) : Promise.resolve([]),
+      uiState.receivablesLoaded ? api(`/final/receivables?${paymentReceivableQuery()}`) : Promise.resolve([]),
       api(`/final/payments?${paymentListQuery()}`)
     ]);
     if (token !== activeRenderToken || activePage() !== 'payments') return;
 
-    const receivableTotal = receivables.reduce(
-      (sum, row) => sum + Number(row.receivable_balance || 0),
-      0
-    );
-    const paymentTotal = payments.reduce(
-      (sum, row) => sum + Number(row.amount || 0),
-      0
-    );
-    const customerCount = new Set(
-      receivables.map((row) => String(row.customer_id))
-    ).size;
-
-    const initialReceivableMessage = uiState.paymentReceivablesLoaded
-      ? '조건에 해당하는 미수금이 없습니다.'
-      : '거래처 또는 발송구분을 선택한 뒤 조회하세요.';
+    const receivableTotal = receivables.reduce((sum, row) => sum + Number(row.receivable_balance || 0), 0);
+    const paymentTotal = payments.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const customerCount = new Set(receivables.map((row) => String(row.customer_id))).size;
+    const initialReceivableMessage = uiState.receivablesLoaded ? '조건에 해당하는 미수금이 없습니다.' : '거래처·납품처·발송구분 조건을 선택하거나 전체 조회를 누르세요.';
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="payments-v210">
-        <div class="mtf-head">
-          <div><h1>수금/미수금</h1></div>
-          <div class="mtf-actions">
-            <button class="mtf-btn help" data-page-help>도움말</button>
-          </div>
-        </div>
+      <div class="mtf-root" data-mtf-view="payments-v300">
+        <div class="mtf-head"><div><h1>수금/미수금</h1></div><div class="mtf-actions"><button class="mtf-btn help" data-page-help>도움말</button></div></div>
 
-        <div class="mtf-toolbar">
-          <div class="mtf-filter-grid">
-            ${customerAutocompleteHtml({
-              id: 'mtf-payment-filter-customer',
-              label: '거래처',
-              value: uiState.paymentFilters.customer_q,
-              customerId: uiState.paymentFilters.customer_id,
-              placeholder: '전체 또는 거래처명 입력'
-            })}
-            <div class="mtf-field">
-              <label>납품처/지역</label>
-              <select class="mtf-select" id="mtf-payment-filter-site">
-                ${siteOptions(filterSites, customerId, uiState.paymentFilters.site_id)}
-              </select>
-            </div>
-            <div class="mtf-field">
-              <label>발송구분</label>
-              <select class="mtf-select" id="mtf-payment-filter-delivery">
-                <option value="">전체</option>
-                ${['택배', '영업방문', '기타'].map((value) => `
-                  <option value="${value}"
-                          ${uiState.paymentFilters.delivery_type === value ? 'selected' : ''}>
-                    ${value}
-                  </option>
-                `).join('')}
-              </select>
-            </div>
-            <div class="mtf-field">
-              <label>수금 시작일</label>
-              <input class="mtf-input" type="date" id="mtf-payment-from"
-                     value="${escapeHtml(uiState.paymentFilters.date_from)}">
-            </div>
-            <div class="mtf-field">
-              <label>수금 종료일</label>
-              <input class="mtf-input" type="date" id="mtf-payment-to"
-                     value="${escapeHtml(uiState.paymentFilters.date_to)}">
-            </div>
-            <div class="mtf-actions">
-              <button class="mtf-btn primary" data-payment-search>조회</button>
-              <button class="mtf-btn" data-payment-reset>초기화</button>
-            </div>
+        <div class="mtf-card">
+          <div class="mtf-head" style="align-items:center"><div><h2 style="margin:0">수금 조회조건</h2></div></div>
+          <div class="mtf-filter-grid" style="margin-top:12px">
+            ${customerAutocompleteHtml({ id: 'mtf-payment-list-customer', label: '거래처', value: uiState.paymentFilters.customer_q, customerId: uiState.paymentFilters.customer_id, placeholder: '전체 또는 거래처명 입력' })}
+            <div class="mtf-field"><label>납품처/지역</label><select class="mtf-select" id="mtf-payment-list-site">${siteOptions(paymentSites, paymentCustomerId, uiState.paymentFilters.site_id)}</select></div>
+            <div class="mtf-field"><label>발송구분</label><select class="mtf-select" id="mtf-payment-list-delivery"><option value="">전체</option>${['택배','영업방문','기타'].map((v)=>`<option value="${v}" ${uiState.paymentFilters.delivery_type===v?'selected':''}>${v}</option>`).join('')}</select></div>
+            <div class="mtf-field"><label>수금 시작일</label><input class="mtf-input" type="date" id="mtf-payment-from" value="${escapeHtml(uiState.paymentFilters.date_from)}"></div>
+            <div class="mtf-field"><label>수금 종료일</label><input class="mtf-input" type="date" id="mtf-payment-to" value="${escapeHtml(uiState.paymentFilters.date_to)}"></div>
+            <div class="mtf-actions"><button class="mtf-btn primary" data-payment-search>조회</button><button class="mtf-btn" data-payment-reset>초기화</button></div>
           </div>
-
           <div class="mtf-summary">
-            <div class="mtf-stat"><span>조회 미수금</span><strong>${money(receivableTotal)}원</strong></div>
-            <div class="mtf-stat"><span>조회 거래처</span><strong>${money(customerCount)}</strong></div>
             <div class="mtf-stat"><span>최근 수금</span><strong>${money(paymentTotal)}원</strong></div>
             <div class="mtf-stat"><span>최근 수금 건수</span><strong>${money(payments.length)}</strong></div>
+            <div class="mtf-stat"><span>조회 시작</span><strong>${escapeHtml(uiState.paymentFilters.date_from)}</strong></div>
+            <div class="mtf-stat"><span>조회 종료</span><strong>${escapeHtml(uiState.paymentFilters.date_to)}</strong></div>
           </div>
         </div>
 
         ${can('payments.write') ? paymentRegistrationHtml() : ''}
 
         <div class="mtf-card">
-          <div class="mtf-head" style="align-items:center">
-            <div><h2 style="margin:0">발송구분별 미수금</h2></div>
+          <div class="mtf-head" style="align-items:center"><div><h2 style="margin:0">발송구분별 미수금 조회조건</h2></div></div>
+          <div class="mtf-filter-grid" style="margin-top:12px">
+            ${customerAutocompleteHtml({ id: 'mtf-receivable-filter-customer', label: '거래처', value: uiState.receivableFilters.customer_q, customerId: uiState.receivableFilters.customer_id, placeholder: '전체 또는 거래처명 입력' })}
+            <div class="mtf-field"><label>납품처/지역</label><select class="mtf-select" id="mtf-receivable-filter-site">${siteOptions(receivableSites, receivableCustomerId, uiState.receivableFilters.site_id)}</select></div>
+            <div class="mtf-field"><label>발송구분</label><select class="mtf-select" id="mtf-receivable-filter-delivery"><option value="">전체</option>${['택배','영업방문','기타'].map((v)=>`<option value="${v}" ${uiState.receivableFilters.delivery_type===v?'selected':''}>${v}</option>`).join('')}</select></div>
+            <div class="mtf-actions"><button class="mtf-btn primary" data-receivable-search>미수금 조회</button><button class="mtf-btn" data-receivable-reset>미수금 조건 초기화</button></div>
+          </div>
+          <div class="mtf-summary">
+            <div class="mtf-stat"><span>조회 미수금</span><strong>${money(receivableTotal)}원</strong></div>
+            <div class="mtf-stat"><span>조회 거래처</span><strong>${money(customerCount)}</strong></div>
+            <div class="mtf-stat"><span>조회 행수</span><strong>${money(receivables.length)}</strong></div>
+            <div class="mtf-stat"><span>발송구분</span><strong>${escapeHtml(uiState.receivableFilters.delivery_type || '전체')}</strong></div>
           </div>
           <div class="mtf-table-wrap" style="margin-top:12px">
-            <table class="mtf-table">
-              <thead>
-                <tr>
-                  <th>거래처</th><th>납품처</th><th>발송구분</th>
-                  <th>매출</th><th>수금</th><th>미수금</th><th>처리</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${receivables.length
-                  ? receivables.map((row, index) => `
-                      <tr>
-                        <td><strong>${escapeHtml(row.customer_name)}</strong></td>
-                        <td>${escapeHtml(row.site_name || '기본')}</td>
-                        <td>${escapeHtml(row.delivery_type || '')}</td>
-                        <td>${money(row.sales_amount)}원</td>
-                        <td>${money(row.payment_amount)}원</td>
-                        <td><strong>${money(row.receivable_balance)}원</strong></td>
-                        <td>
-                          ${can('payments.write') && Number(row.receivable_balance) > 0
-                            ? `<button class="mtf-btn small success" data-apply-receivable="${index}">수금 반영</button>`
-                            : '-'}
-                        </td>
-                      </tr>
-                    `).join('')
-                  : `<tr><td colspan="7" class="mtf-empty">${initialReceivableMessage}</td></tr>`}
-              </tbody>
-            </table>
+            <table class="mtf-table"><thead><tr><th>거래처</th><th>납품처</th><th>발송구분</th><th>매출</th><th>수금</th><th>미수금</th><th>처리</th></tr></thead><tbody>
+              ${receivables.length ? receivables.map((row, index)=>`
+                <tr><td><strong>${escapeHtml(displayCustomerName(row))}</strong></td><td>${escapeHtml(row.site_name || '기본')}</td><td>${escapeHtml(row.delivery_type || '')}</td><td>${money(row.sales_amount)}원</td><td>${money(row.payment_amount)}원</td><td><strong>${money(row.receivable_balance)}원</strong></td><td>${can('payments.write') && Number(row.receivable_balance)>0 ? `<button class="mtf-btn small success" data-apply-receivable="${index}">수금 반영</button>` : '-'}</td></tr>`).join('') : `<tr><td colspan="7" class="mtf-empty">${initialReceivableMessage}</td></tr>`}
+            </tbody></table>
           </div>
         </div>
 
-        <div class="mtf-card">
-          <h2 style="margin-top:0">최근 수금</h2>
-          <div class="mtf-table-wrap">
-            <table class="mtf-table">
-              <thead>
-                <tr>
-                  <th>일자</th><th>수금번호</th><th>거래처</th><th>발송구분</th>
-                  <th>납품처</th><th>방법</th><th>금액</th><th>승인/비고</th><th>관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${payments.length
-                  ? payments.map((payment) => `
-                      <tr>
-                        <td>${fmtDate(payment.payment_date)}</td>
-                        <td>${escapeHtml(payment.payment_no)}</td>
-                        <td>${escapeHtml(payment.customer_name)}</td>
-                        <td>${escapeHtml(payment.delivery_type || '')}</td>
-                        <td>${escapeHtml(payment.site_name || payment.region || '')}</td>
-                        <td>${statusBadge(payment.method)}</td>
-                        <td>${money(payment.amount)}원</td>
-                        <td>${escapeHtml(repairMojibake(payment.display_note || payment.approval_no || payment.memo || ''))}</td>
-                        <td>
-                          ${can('payments.write')
-                            ? `
-                              <div class="mtf-actions">
-                                <button class="mtf-btn small primary" data-payment-edit="${payment.id}">수정</button>
-                                <button class="mtf-btn small danger" data-payment-delete="${payment.id}">삭제</button>
-                              </div>
-                            `
-                            : ''}
-                        </td>
-                      </tr>
-                    `).join('')
-                  : '<tr><td colspan="9" class="mtf-empty">최근 수금 자료가 없습니다.</td></tr>'}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    `;
+        <div class="mtf-card"><h2 style="margin-top:0">최근 수금</h2><div class="mtf-table-wrap"><table class="mtf-table"><thead><tr><th>일자</th><th>수금번호</th><th>거래처</th><th>발송구분</th><th>납품처</th><th>방법</th><th>금액</th><th>승인/비고</th><th>관리</th></tr></thead><tbody>
+          ${payments.length ? payments.map((payment)=>`
+            <tr><td>${fmtDate(payment.payment_date)}</td><td>${escapeHtml(payment.payment_no)}</td><td>${escapeHtml(displayCustomerName(payment))}</td><td>${escapeHtml(payment.delivery_type || '')}</td><td>${escapeHtml(payment.site_name || payment.region || '')}</td><td>${statusBadge(payment.method)}</td><td>${money(payment.amount)}원</td><td>${escapeHtml(repairMojibake(payment.display_note || payment.approval_no || payment.memo || ''))}</td><td>${can('payments.write') ? `<div class="mtf-actions"><button class="mtf-btn small primary" data-payment-edit="${payment.id}">수정</button><button class="mtf-btn small danger" data-payment-delete="${payment.id}">삭제</button></div>` : ''}</td></tr>`).join('') : '<tr><td colspan="9" class="mtf-empty">최근 수금 자료가 없습니다.</td></tr>'}
+        </tbody></table></div></div>
+      </div>`;
 
     bindCustomerAutocomplete(el, customers);
-    const filterWrapper = el.querySelector(
-      '[data-mtf-ac="mtf-payment-filter-customer"]'
-    );
-    const filterHidden = filterWrapper?.querySelector('[data-mtf-ac-value]');
-    const filterSite = el.querySelector('#mtf-payment-filter-site');
-
-    filterWrapper?.querySelector('[data-mtf-ac-input]')?.addEventListener(
-      'input',
-      () => {
-        uiState.paymentFilters.customer_id = '';
-        uiState.paymentFilters.site_id = '';
-        filterSite.innerHTML = '<option value="">거래처를 먼저 선택하세요</option>';
-      }
-    );
-
-    filterWrapper?.addEventListener('mtf-customer-selected', async (event) => {
-      const customer = event.detail;
-      uiState.paymentFilters.customer_id = customer?.id || '';
-      uiState.paymentFilters.customer_q = customer?.name || '';
-      uiState.paymentFilters.site_id = '';
-      filterSite.innerHTML = customer
-        ? '<option value="">납품처 불러오는 중...</option>'
-        : '<option value="">거래처를 먼저 선택하세요</option>';
-      if (!customer) return;
-      try {
-        const rows = await loadCustomerSites(customer.id);
-        if (String(filterHidden?.value || '') !== String(customer.id)) return;
-        filterSite.innerHTML = siteOptions(rows, customer.id);
-      } catch (error) {
-        showToast(error.message, 'error');
-      }
-    });
+    const paymentBinding = bindFilterCustomer({ el, customers, wrapperId: 'mtf-payment-list-customer', filter: uiState.paymentFilters, siteSelectId: '#mtf-payment-list-site' });
+    const receivableBinding = bindFilterCustomer({ el, customers, wrapperId: 'mtf-receivable-filter-customer', filter: uiState.receivableFilters, siteSelectId: '#mtf-receivable-filter-site' });
 
     const runPaymentSearch = () => {
-      uiState.paymentFilters.customer_q =
-        el.querySelector('#mtf-payment-filter-customer').value.trim();
-      uiState.paymentFilters.customer_id = filterHidden?.value || '';
-      uiState.paymentFilters.site_id = uiState.paymentFilters.customer_id
-        ? filterSite.value
-        : '';
-      uiState.paymentFilters.delivery_type =
-        el.querySelector('#mtf-payment-filter-delivery').value;
-      uiState.paymentFilters.date_from =
-        el.querySelector('#mtf-payment-from').value;
-      uiState.paymentFilters.date_to =
-        el.querySelector('#mtf-payment-to').value;
-
-      if (!hasReceivableFilter()) {
-        uiState.paymentReceivablesLoaded = false;
-        showToast('미수금 조회는 거래처 또는 발송구분을 선택하세요.', 'error');
-        return;
-      }
-      uiState.paymentReceivablesLoaded = true;
+      uiState.paymentFilters.customer_q = el.querySelector('#mtf-payment-list-customer').value.trim();
+      uiState.paymentFilters.customer_id = paymentBinding.hidden?.value || '';
+      uiState.paymentFilters.site_id = uiState.paymentFilters.customer_id ? paymentBinding.siteSelect.value : '';
+      uiState.paymentFilters.delivery_type = el.querySelector('#mtf-payment-list-delivery').value;
+      uiState.paymentFilters.date_from = el.querySelector('#mtf-payment-from').value || uiState.dateBounds?.min_payment_date || '1900-01-01';
+      uiState.paymentFilters.date_to = el.querySelector('#mtf-payment-to').value || today();
       return renderPayments(el);
     };
-
     const paymentSearchButton = el.querySelector('[data-payment-search]');
-    const runPaymentSearchWithBusy = () => withBusyButton(
-      paymentSearchButton,
-      '조회 중...',
-      runPaymentSearch
-    );
+    const runPaymentSearchWithBusy = () => withBusyButton(paymentSearchButton, '조회 중...', runPaymentSearch);
     paymentSearchButton.addEventListener('click', runPaymentSearchWithBusy);
-    bindEnterAction(
-      el,
-      '#mtf-payment-filter-customer,#mtf-payment-filter-site,#mtf-payment-filter-delivery,#mtf-payment-from,#mtf-payment-to',
-      runPaymentSearchWithBusy
-    );
+    bindEnterAction(el, '#mtf-payment-list-customer,#mtf-payment-list-site,#mtf-payment-list-delivery,#mtf-payment-from,#mtf-payment-to', runPaymentSearchWithBusy);
 
     el.querySelector('[data-payment-reset]').addEventListener('click', () => {
-      uiState.paymentFilters = {
-        customer_q: '',
-        customer_id: '',
-        site_id: '',
-        delivery_type: '',
-        date_from: monthAgo(),
-        date_to: today()
-      };
-      uiState.paymentReceivablesLoaded = false;
+      uiState.paymentFilters = { customer_q: '', customer_id: '', site_id: '', delivery_type: '', date_from: uiState.dateBounds?.min_payment_date || '1900-01-01', date_to: uiState.dateBounds?.today_date || today() };
+      renderPayments(el);
+    });
+
+    const runReceivableSearch = () => {
+      uiState.receivableFilters.customer_q = el.querySelector('#mtf-receivable-filter-customer').value.trim();
+      uiState.receivableFilters.customer_id = receivableBinding.hidden?.value || '';
+      uiState.receivableFilters.site_id = uiState.receivableFilters.customer_id ? receivableBinding.siteSelect.value : '';
+      uiState.receivableFilters.delivery_type = el.querySelector('#mtf-receivable-filter-delivery').value;
+      uiState.receivablesLoaded = true;
+      return renderPayments(el);
+    };
+    const receivableSearchButton = el.querySelector('[data-receivable-search]');
+    const runReceivableSearchWithBusy = () => withBusyButton(receivableSearchButton, '미수금 조회 중...', runReceivableSearch);
+    receivableSearchButton.addEventListener('click', runReceivableSearchWithBusy);
+    bindEnterAction(el, '#mtf-receivable-filter-customer,#mtf-receivable-filter-site,#mtf-receivable-filter-delivery', runReceivableSearchWithBusy);
+
+    el.querySelector('[data-receivable-reset]').addEventListener('click', () => {
+      uiState.receivableFilters = { customer_q: '', customer_id: '', site_id: '', delivery_type: '' };
+      uiState.receivablesLoaded = false;
       renderPayments(el);
     });
 
@@ -2749,41 +2564,26 @@
     el.querySelectorAll('[data-apply-receivable]').forEach((button) => {
       button.addEventListener('click', async () => {
         button.disabled = true;
-        try {
-          const row = receivables[Number(button.dataset.applyReceivable)];
-          await applyReceivableToPaymentForm(el, row, customers);
-        } catch (error) {
-          showToast(error.message, 'error');
-        } finally {
-          button.disabled = false;
-        }
+        try { await applyReceivableToPaymentForm(el, receivables[Number(button.dataset.applyReceivable)], customers); }
+        catch (error) { showToast(error.message, 'error'); }
+        finally { button.disabled = false; }
       });
     });
 
     el.querySelectorAll('[data-payment-edit]').forEach((button) => {
       button.addEventListener('click', async () => {
-        const payment = payments.find(
-          (row) => String(row.id) === button.dataset.paymentEdit
-        );
-        try {
-          await openPaymentEditModal(payment, customers);
-        } catch (error) {
-          showToast(error.message, 'error');
-        }
+        const payment = payments.find((row) => String(row.id) === button.dataset.paymentEdit);
+        try { await openPaymentEditModal(payment, customers); }
+        catch (error) { showToast(error.message, 'error'); }
       });
     });
 
     el.querySelectorAll('[data-payment-delete]').forEach((button) => {
       button.addEventListener('click', async () => {
-        const reason = window.prompt(
-          '수금 삭제 사유를 입력하세요.\n수정이력에 영구 기록됩니다.'
-        );
+        const reason = window.prompt('수금 삭제 사유를 입력하세요.\n수정이력에 영구 기록됩니다.');
         if (!reason?.trim()) return;
-        await api(`/payments/${button.dataset.paymentDelete}`, {
-          method: 'DELETE',
-          body: JSON.stringify({ delete_reason: reason.trim() })
-        });
-        uiState.paymentReceivablesLoaded = hasReceivableFilter();
+        await api(`/payments/${button.dataset.paymentDelete}`, { method: 'DELETE', body: JSON.stringify({ delete_reason: reason.trim() }) });
+        uiState.receivablesLoaded = true;
         showToast('수금을 삭제 처리했습니다.');
         renderPayments(el);
       });
@@ -2796,7 +2596,7 @@
     const el = contentElement();
     if (!el || !['customers', 'orders', 'payments'].includes(page)) return;
 
-    const marker = el.querySelector(`[data-mtf-view="${page}-v210"]`);
+    const marker = el.querySelector(`[data-mtf-view="${page}-v300"]`);
     if (marker && !force) return;
 
     try {
@@ -2807,7 +2607,7 @@
       if (page === 'orders') await renderOrders(el);
       if (page === 'payments') await renderPayments(el);
     } catch (error) {
-      console.error('[MT Final Features]', error);
+      console.error('[MT Final V300]', error);
       showToast(error.message, 'error');
     }
   }

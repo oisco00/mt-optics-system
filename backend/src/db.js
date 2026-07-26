@@ -426,6 +426,75 @@ async function ensureV15Schema(targetPool) {
   await targetPool.execute('INSERT IGNORE INTO schema_migrations(version) VALUES (?)', ['2026-07-24-v1.5-security-mobile-address-audit']);
 }
 
+function mysqlPhoneFormatExpression(columnName) {
+  return `CASE
+    WHEN ${columnName} IS NULL OR ${columnName} = '' THEN ${columnName}
+    WHEN REGEXP_REPLACE(${columnName}, '[^0-9]', '') REGEXP '^02[0-9]{7}$' THEN CONCAT('02-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 3, 3), '-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 6))
+    WHEN REGEXP_REPLACE(${columnName}, '[^0-9]', '') REGEXP '^02[0-9]{8}$' THEN CONCAT('02-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 3, 4), '-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 7))
+    WHEN LENGTH(REGEXP_REPLACE(${columnName}, '[^0-9]', '')) = 8 THEN CONCAT(SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 1, 4), '-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 5))
+    WHEN LENGTH(REGEXP_REPLACE(${columnName}, '[^0-9]', '')) = 10 THEN CONCAT(SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 1, 3), '-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 4, 3), '-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 7))
+    WHEN LENGTH(REGEXP_REPLACE(${columnName}, '[^0-9]', '')) = 11 THEN CONCAT(SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 1, 3), '-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 4, 4), '-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 8))
+    ELSE ${columnName}
+  END`;
+}
+
+function mysqlBusinessNoFormatExpression(columnName) {
+  return `CASE
+    WHEN ${columnName} IS NULL OR ${columnName} = '' THEN ${columnName}
+    WHEN LENGTH(REGEXP_REPLACE(${columnName}, '[^0-9]', '')) = 10 THEN CONCAT(SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 1, 3), '-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 4, 2), '-', SUBSTRING(REGEXP_REPLACE(${columnName}, '[^0-9]', ''), 6))
+    ELSE ${columnName}
+  END`;
+}
+
+async function ensureV300DataQuality(targetPool) {
+  // Keep phone/business-number formats consistent at storage level. REGEXP_REPLACE is available in MySQL 8/MariaDB 10+.
+  try {
+    for (const tableName of ['customers', 'customer_sites']) {
+      await targetPool.query(`UPDATE ${quoteIdentifier(tableName)}
+         SET phone = ${mysqlPhoneFormatExpression('phone')},
+             mobile = ${mysqlPhoneFormatExpression('mobile')},
+             business_no = ${mysqlBusinessNoFormatExpression('business_no')}
+       WHERE phone IS NOT NULL OR mobile IS NOT NULL OR business_no IS NOT NULL`);
+    }
+  } catch (error) {
+    console.warn('[V300] 전화번호/사업자번호 자동정리는 건너뜁니다:', error.message);
+  }
+
+  await targetPool.query(`CREATE OR REPLACE VIEW v_customer_receivable_by_delivery_type AS
+    SELECT
+      c.id AS customer_id,
+      c.code,
+      c.name AS customer_name,
+      cs.original_customer_name,
+      cs.id AS customer_site_id,
+      COALESCE(cs.site_name, '기본') AS site_name,
+      COALESCE(rt.delivery_type, '택배') AS delivery_type,
+      COALESCE(SUM(CASE WHEN rt.amount > 0 THEN rt.amount ELSE 0 END), 0) AS sales_amount,
+      COALESCE(SUM(CASE WHEN rt.amount < 0 THEN -rt.amount ELSE 0 END), 0) AS payment_amount,
+      COALESCE(SUM(rt.amount), 0) AS receivable_balance
+    FROM customers c
+    LEFT JOIN receivable_transactions rt ON rt.customer_id = c.id
+    LEFT JOIN customer_sites cs ON cs.id = rt.customer_site_id
+    GROUP BY c.id, c.code, c.name, cs.original_customer_name, cs.id, cs.site_name, COALESCE(rt.delivery_type, '택배')`);
+
+  await targetPool.query(`CREATE OR REPLACE VIEW v_customer_site_receivable_balance AS
+    SELECT
+      c.id AS customer_id,
+      c.code,
+      c.name AS customer_name,
+      cs.id AS customer_site_id,
+      cs.site_name,
+      cs.region,
+      cs.default_delivery_type,
+      cs.opening_receivable + COALESCE(SUM(rt.amount), 0) AS receivable_balance
+    FROM customer_sites cs
+    JOIN customers c ON c.id = cs.customer_id
+    LEFT JOIN receivable_transactions rt ON rt.customer_site_id = cs.id
+    GROUP BY c.id, c.code, c.name, cs.id, cs.site_name, cs.region, cs.default_delivery_type, cs.opening_receivable`);
+
+  await targetPool.execute('INSERT IGNORE INTO schema_migrations(version) VALUES (?)', ['2026-07-26-v300-final-quality']);
+}
+
 async function initDb() {
   if (pool) return pool;
   if (initPromise) return initPromise;
@@ -440,6 +509,7 @@ async function initDb() {
       await ensureV13Schema(pool);
       await ensureV14Schema(pool);
       await ensureV15Schema(pool);
+      await ensureV300DataQuality(pool);
     }
     return pool;
   })();
