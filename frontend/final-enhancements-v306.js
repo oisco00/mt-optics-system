@@ -1,6 +1,6 @@
-// MT_OPTICS_FINAL_FEATURES_V304
+// MT_OPTICS_FINAL_FEATURES_V306
 (() => {
-  const VERSION = '3.0.4';
+  const VERSION = '3.0.6';
   const API_BASE = localStorage.getItem('mt_api_base') || '/api';
   const cache = {
     user: null,
@@ -284,10 +284,10 @@
   }
 
   function injectStyles() {
-    if (document.getElementById('mt-final-styles-v304')) return;
+    if (document.getElementById('mt-final-styles-v306')) return;
 
     const style = document.createElement('style');
-    style.id = 'mt-final-styles-v304';
+    style.id = 'mt-final-styles-v306';
     style.textContent = `
       .mtf-root{display:grid;gap:18px}
       .mtf-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
@@ -359,17 +359,17 @@
       .mtf-ac-item:hover,.mtf-ac-item.active{background:#eff6ff}
       .mtf-ac-item:hover strong,.mtf-ac-item.active strong{color:#0f172a!important}
       .mtf-ac-item:last-child{border-bottom:0}
-      .mtf-postcode-layer{position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:18px}
+      .mtf-postcode-layer{position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:18px}
       .mtf-postcode-box{width:min(560px,96vw);height:min(640px,86vh);background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,.28);overflow:hidden;display:flex;flex-direction:column}
       .mtf-postcode-head{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid #e2e8f0}
       .mtf-postcode-body{flex:1;min-height:0}
 
-      .mtf-address-v304-box{width:min(720px,96vw);background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,.28);overflow:hidden;display:flex;flex-direction:column;max-height:90vh}
-      .mtf-address-v304-body{padding:16px;overflow:auto;background:#f8fafc}
-      .mtf-address-v304-guide{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:12px;padding:12px 14px;line-height:1.55;margin-bottom:12px;font-weight:700}
-      .mtf-address-v304-guide small{display:block;color:#475569;font-weight:600;margin-top:4px}
-      .mtf-address-v304-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-      .mtf-address-v304-actions .mtf-btn{height:38px}
+      .mtf-address-v306-box{width:min(720px,96vw);background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,.28);overflow:hidden;display:flex;flex-direction:column;max-height:90vh}
+      .mtf-address-v306-body{padding:16px;overflow:auto;background:#f8fafc}
+      .mtf-address-v306-guide{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:12px;padding:12px 14px;line-height:1.55;margin-bottom:12px;font-weight:700}
+      .mtf-address-v306-guide small{display:block;color:#475569;font-weight:600;margin-top:4px}
+      .mtf-address-v306-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+      .mtf-address-v306-actions .mtf-btn{height:38px}
       .mtf-items{display:grid;gap:8px}
       .mtf-item-row{display:grid;grid-template-columns:2.2fr 1fr .8fr 1fr auto;gap:8px;align-items:end;padding:10px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc}
       .mtf-selected-bar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:12px 14px}
@@ -1034,17 +1034,17 @@
     ].join('');
   }
 
-  // V305: Kakao postcode API restored with top-most layer
+  // V306: Kakao postcode API restored with top-most layer
   // Root cause found: the postcode layer used z-index 9999, but the customer modal uses z-index 100000.
-  // Therefore the Kakao iframe could be created behind the existing modal. V305 creates a top-level layer
+  // Therefore the Kakao iframe could be created behind the existing modal. V306 creates a top-level layer
   // with z-index 2147483647 and uses the current Kakao API constructor while keeping manual fallback.
 
-  let mtfPostcodeScriptPromiseV305 = null;
-  function ensureKakaoPostcodeV305() {
+  let mtfPostcodeScriptPromiseV306 = null;
+  function ensureKakaoPostcodeV306() {
     if (window.kakao?.Postcode || window.daum?.Postcode) return Promise.resolve();
-    if (mtfPostcodeScriptPromiseV305) return mtfPostcodeScriptPromiseV305;
-    mtfPostcodeScriptPromiseV305 = new Promise((resolve, reject) => {
-      const existing = document.querySelector('script[data-mtf-postcode-v305]')
+    if (mtfPostcodeScriptPromiseV306) return mtfPostcodeScriptPromiseV306;
+    mtfPostcodeScriptPromiseV306 = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-mtf-postcode-v306]')
         || Array.from(document.scripts).find((s) => String(s.src || '').includes('/postcode/prod/postcode.v2.js'));
       if (existing && (window.kakao?.Postcode || window.daum?.Postcode)) return resolve();
       if (existing) {
@@ -1058,15 +1058,15 @@
       const script = document.createElement('script');
       script.src = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
       script.async = true;
-      script.dataset.mtfPostcodeV305 = '1';
+      script.dataset.mtfPostcodeV306 = '1';
       script.onload = () => resolve();
       script.onerror = () => reject(new Error('카카오 우편번호 스크립트를 불러오지 못했습니다. 인터넷 연결 또는 CSP를 확인하세요.'));
       document.head.appendChild(script);
     });
-    return mtfPostcodeScriptPromiseV305;
+    return mtfPostcodeScriptPromiseV306;
   }
 
-  function postcodeConstructorV305() {
+  function postcodeConstructorV306() {
     return window.kakao?.Postcode || window.daum?.Postcode || null;
   }
 
@@ -1115,14 +1115,14 @@
     if (detailInput) setTimeout(() => detailInput.focus(), 30);
   }
 
-  function applyManualAddressV305(layer, block) {
+  function applyManualAddressV306(layer, block) {
     fillAddressBlock(block, {
       userSelectedType: 'R',
-      zonecode: layer.querySelector('[name="v305_postal_code"]')?.value || '',
-      roadAddress: layer.querySelector('[name="v305_road_address"]')?.value || '',
-      jibunAddress: layer.querySelector('[name="v305_jibun_address"]')?.value || ''
+      zonecode: layer.querySelector('[name="v306_postal_code"]')?.value || '',
+      roadAddress: layer.querySelector('[name="v306_road_address"]')?.value || '',
+      jibunAddress: layer.querySelector('[name="v306_jibun_address"]')?.value || ''
     });
-    const detail = layer.querySelector('[name="v305_detail_address"]')?.value || '';
+    const detail = layer.querySelector('[name="v306_detail_address"]')?.value || '';
     const detailInput = addressField(block, 'detail_address') || addressField(block, 'address_detail');
     if (detailInput && detail) {
       detailInput.value = detail;
@@ -1131,7 +1131,7 @@
     }
   }
 
-  function showManualAddressFallbackV305(layer, block, message = '') {
+  function showManualAddressFallbackV306(layer, block, message = '') {
     const body = layer.querySelector('.mtf-postcode-body');
     const postal = addressCurrentValue(block, 'postal_code', 'postcode', 'zip_code');
     const road = addressCurrentValue(block, 'road_address', 'address');
@@ -1146,42 +1146,42 @@
         <div class="mtf-form-grid">
           <div class="mtf-field">
             <label>우편번호</label>
-            <input class="mtf-input" name="v305_postal_code" value="${escapeHtml(postal)}" inputmode="numeric" placeholder="예: 12345">
+            <input class="mtf-input" name="v306_postal_code" value="${escapeHtml(postal)}" inputmode="numeric" placeholder="예: 12345">
           </div>
           <div class="mtf-field mtf-span-2">
             <label>도로명주소</label>
-            <input class="mtf-input" name="v305_road_address" value="${escapeHtml(road)}" placeholder="도로명주소 입력">
+            <input class="mtf-input" name="v306_road_address" value="${escapeHtml(road)}" placeholder="도로명주소 입력">
           </div>
           <div class="mtf-field mtf-span-3">
             <label>지번주소</label>
-            <input class="mtf-input" name="v305_jibun_address" value="${escapeHtml(jibun)}" placeholder="필요 시 입력">
+            <input class="mtf-input" name="v306_jibun_address" value="${escapeHtml(jibun)}" placeholder="필요 시 입력">
           </div>
           <div class="mtf-field mtf-span-3">
             <label>상세주소</label>
-            <input class="mtf-input" name="v305_detail_address" value="${escapeHtml(detail)}" placeholder="동·층·호 등">
+            <input class="mtf-input" name="v306_detail_address" value="${escapeHtml(detail)}" placeholder="동·층·호 등">
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-          <button type="button" class="mtf-btn" data-open-juso-v305>도로명주소 검색 사이트 열기</button>
-          <button type="button" class="mtf-btn primary" data-apply-manual-v305>주소 적용</button>
+          <button type="button" class="mtf-btn" data-open-juso-v306>도로명주소 검색 사이트 열기</button>
+          <button type="button" class="mtf-btn primary" data-apply-manual-v306>주소 적용</button>
         </div>
       </div>`;
-    body.querySelector('[data-open-juso-v305]')?.addEventListener('click', () => {
-      const popup = window.open('https://www.juso.go.kr/openIndexPage.do', 'jusoSearchV305', 'width=1100,height=780,scrollbars=yes,resizable=yes');
+    body.querySelector('[data-open-juso-v306]')?.addEventListener('click', () => {
+      const popup = window.open('https://www.juso.go.kr/openIndexPage.do', 'jusoSearchV306', 'width=1100,height=780,scrollbars=yes,resizable=yes');
       if (popup) { try { popup.focus(); } catch (_) {} }
       else showToast('팝업이 차단되었습니다. 브라우저 주소창에서 www.juso.go.kr 을 열어 주소를 검색하세요.', 'error');
     });
-    body.querySelector('[data-apply-manual-v305]')?.addEventListener('click', () => {
-      applyManualAddressV305(layer, block);
+    body.querySelector('[data-apply-manual-v306]')?.addEventListener('click', () => {
+      applyManualAddressV306(layer, block);
       layer.remove();
       showToast('주소를 반영했습니다.', 'success');
     });
   }
 
-  function createPostcodeLayerV305() {
-    document.querySelectorAll('.mtf-postcode-layer,.mtf-address-v304-layer,.mtf-address-v305-layer').forEach((node) => node.remove());
+  function createPostcodeLayerV306() {
+    document.querySelectorAll('.mtf-postcode-layer,.mtf-address-v306-layer,.mtf-address-v306-layer').forEach((node) => node.remove());
     const layer = document.createElement('div');
-    layer.className = 'mtf-postcode-layer mtf-address-v305-layer';
+    layer.className = 'mtf-postcode-layer mtf-address-v306-layer';
     layer.setAttribute('role', 'dialog');
     layer.setAttribute('aria-modal', 'true');
     layer.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.56);display:flex;align-items:center;justify-content:center;padding:18px;';
@@ -1190,9 +1190,9 @@
         <div class="mtf-postcode-head" style="height:54px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 14px;border-bottom:1px solid #e2e8f0;background:#fff;flex-shrink:0">
           <strong>주소검색</strong>
           <div style="display:flex;gap:6px;align-items:center">
-            <button type="button" class="mtf-btn small" data-postcode-popup-v305>팝업형 재시도</button>
-            <button type="button" class="mtf-btn small" data-postcode-manual-v305>직접입력</button>
-            <button type="button" class="mtf-btn small" data-close-postcode-v305>닫기</button>
+            <button type="button" class="mtf-btn small" data-postcode-popup-v306>팝업형 재시도</button>
+            <button type="button" class="mtf-btn small" data-postcode-manual-v306>직접입력</button>
+            <button type="button" class="mtf-btn small" data-close-postcode-v306>닫기</button>
           </div>
         </div>
         <div class="mtf-postcode-body" style="flex:1;min-height:520px;background:#fff;position:relative"></div>
@@ -1201,17 +1201,17 @@
     return layer;
   }
 
-  async function openKakaoPostcodeLayerV305(button) {
+  async function openKakaoPostcodeLayerV306(button) {
     const block = findAddressBlockFromButton(button);
     if (!block) {
       showToast('주소 입력 영역을 찾지 못했습니다.', 'error');
       return;
     }
-    const layer = createPostcodeLayerV305();
+    const layer = createPostcodeLayerV306();
     const body = layer.querySelector('.mtf-postcode-body');
     const close = () => layer.remove();
-    layer.querySelector('[data-close-postcode-v305]')?.addEventListener('click', close);
-    layer.querySelector('[data-postcode-manual-v305]')?.addEventListener('click', () => showManualAddressFallbackV305(layer, block, '직접입력 모드입니다.'));
+    layer.querySelector('[data-close-postcode-v306]')?.addEventListener('click', close);
+    layer.querySelector('[data-postcode-manual-v306]')?.addEventListener('click', () => showManualAddressFallbackV306(layer, block, '직접입력 모드입니다.'));
     layer.addEventListener('click', (event) => { if (event.target === layer) close(); });
     document.addEventListener('keydown', function escHandler(event) {
       if (!document.body.contains(layer) && !document.documentElement.contains(layer)) {
@@ -1223,25 +1223,25 @@
 
     const openPopup = async () => {
       try {
-        await ensureKakaoPostcodeV305();
-        const Postcode = postcodeConstructorV305();
+        await ensureKakaoPostcodeV306();
+        const Postcode = postcodeConstructorV306();
         if (!Postcode) throw new Error('Postcode constructor not found');
         const popup = new Postcode({
           oncomplete(data) { fillAddressBlock(block, data); close(); }
         });
-        popup.open({ popupKey: 'mtOpticsPostcodeV305', popupTitle: 'MT옵틱스 주소검색', autoClose: true });
+        popup.open({ popupKey: 'mtOpticsPostcodeV306', popupTitle: 'MT옵틱스 주소검색', autoClose: true });
         showToast('카카오 주소검색 팝업을 열었습니다. 팝업창에서 주소를 선택하세요.', 'info');
       } catch (error) {
         console.error(error);
-        showManualAddressFallbackV305(layer, block, '팝업형 주소검색을 열지 못했습니다. 직접입력을 사용하세요.');
+        showManualAddressFallbackV306(layer, block, '팝업형 주소검색을 열지 못했습니다. 직접입력을 사용하세요.');
       }
     };
-    layer.querySelector('[data-postcode-popup-v305]')?.addEventListener('click', openPopup);
+    layer.querySelector('[data-postcode-popup-v306]')?.addEventListener('click', openPopup);
 
     body.innerHTML = '<div class="mtf-loading">카카오 주소검색을 불러오는 중입니다...</div>';
     try {
-      await ensureKakaoPostcodeV305();
-      const Postcode = postcodeConstructorV305();
+      await ensureKakaoPostcodeV306();
+      const Postcode = postcodeConstructorV306();
       if (!Postcode) throw new Error('Kakao Postcode constructor not loaded');
       body.innerHTML = '';
       const initialKeyword = addressCurrentValue(block, 'road_address', 'address', 'jibun_address');
@@ -1262,11 +1262,11 @@
       postcode.embed(body, initialKeyword ? { q: initialKeyword, autoClose: true } : { autoClose: true });
       setTimeout(() => {
         const iframe = body.querySelector('iframe');
-        if (!iframe) showManualAddressFallbackV305(layer, block, '주소검색 iframe이 생성되지 않았습니다. 직접입력 또는 팝업형 재시도를 사용하세요.');
+        if (!iframe) showManualAddressFallbackV306(layer, block, '주소검색 iframe이 생성되지 않았습니다. 직접입력 또는 팝업형 재시도를 사용하세요.');
       }, 3500);
     } catch (error) {
       console.error(error);
-      showManualAddressFallbackV305(layer, block, '카카오 주소검색 API 로딩에 실패했습니다. 직접입력 또는 도로명주소 검색 사이트를 사용하세요.');
+      showManualAddressFallbackV306(layer, block, '카카오 주소검색 API 로딩에 실패했습니다. 직접입력 또는 도로명주소 검색 사이트를 사용하세요.');
     }
   }
 
@@ -1284,20 +1284,20 @@
 
   function bindAddressSearch(scope) {
     scope.querySelectorAll('[data-mtf-address-search], .address-search-btn').forEach((button) => {
-      button.dataset.mtfAddressV305 = '1';
+      button.dataset.mtfAddressV306 = '1';
     });
   }
 
-  // Capture phase: override all previous v300-v304 address handlers and open the top-most V305 Kakao layer.
-  if (!window.__MT_OPTICS_ADDRESS_V305_CAPTURE__) {
-    window.__MT_OPTICS_ADDRESS_V305_CAPTURE__ = true;
+  // Capture phase: override all previous v300-v306 address handlers and open the top-most V306 Kakao layer.
+  if (!window.__MT_OPTICS_ADDRESS_V306_CAPTURE__) {
+    window.__MT_OPTICS_ADDRESS_V306_CAPTURE__ = true;
     document.addEventListener('click', (event) => {
       const trigger = isAddressSearchTrigger(event.target);
       if (!trigger) return;
       event.preventDefault();
       event.stopPropagation();
       if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
-      openKakaoPostcodeLayerV305(trigger);
+      openKakaoPostcodeLayerV306(trigger);
     }, true);
   }
 
@@ -1641,7 +1641,7 @@
     );
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="customers-v304">
+      <div class="mtf-root" data-mtf-view="customers-v306">
         <div class="mtf-head">
           <div><h1>거래처/원장</h1></div>
           <div class="mtf-actions">
@@ -1873,7 +1873,7 @@
     );
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="orders-v304">
+      <div class="mtf-root" data-mtf-view="orders-v306">
         <div class="mtf-head">
           <div><h1>주문/출고</h1></div>
           <div class="mtf-actions">
@@ -3016,7 +3016,7 @@
       : '발송구분별 미수금은 아래 별도 조건에서 거래처 또는 발송구분을 선택한 뒤 조회하세요.';
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="payments-v304">
+      <div class="mtf-root" data-mtf-view="payments-v306">
         <div class="mtf-head">
           <div><h1>수금/미수금</h1></div>
           <div class="mtf-actions"><button class="mtf-btn help" data-page-help>도움말</button></div>
@@ -3280,7 +3280,7 @@
     const el = contentElement();
     if (!el || !['customers', 'orders', 'payments'].includes(page)) return;
 
-    const marker = el.querySelector(`[data-mtf-view="${page}-v304"]`);
+    const marker = el.querySelector(`[data-mtf-view="${page}-v306"]`);
     if (marker && !force) return;
 
     try {
@@ -3300,18 +3300,7 @@
     clearTimeout(renderTimer);
     renderTimer = setTimeout(() => renderCurrentPage(force), 90);
   }
-
-
-  // V304 주소검색 최종 차단기: 기존 app.js 또는 이전 패치의 카카오 팝업/iframe 핸들러보다 먼저 실행합니다.
-  // 이 부분은 open/embed를 전혀 호출하지 않고 내부 직접입력 모달만 엽니다.
-  document.addEventListener('click', (event) => {
-    const trigger = isAddressSearchTrigger(event.target);
-    if (!trigger) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
-    openAddressManualModal(trigger);
-  }, true);
+  // V306: the old manual-only V306 blocker has been removed so Kakao Postcode opens first.
 
   const observer = new MutationObserver(() => {
     scheduleRender(false);
@@ -3342,5 +3331,5 @@
   window.addEventListener('load', () => scheduleRender(true));
   scheduleRender(true);
 
-  console.info(`MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V304 ${VERSION} 수정본 로드 완료`);
+  console.info(`MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V306 ${VERSION} 로드 완료`);
 })();
