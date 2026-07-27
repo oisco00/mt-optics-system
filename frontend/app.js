@@ -116,49 +116,21 @@ function addressFields(row = {}) {
 }
 
 function bindAddressSearch(scope = modalRoot) {
-  function closeLayer(layer) { layer?.remove(); }
-  function fillAddress(block, data) {
-    const selectedType = data.userSelectedType === 'J' ? 'J' : 'R';
-    const road = data.roadAddress || data.autoRoadAddress || '';
-    const jibun = data.jibunAddress || data.autoJibunAddress || '';
-    const selected = selectedType === 'J' ? (jibun || road) : (road || jibun);
-    const fields = {
-      postal_code: data.zonecode || '',
-      road_address: road,
-      jibun_address: jibun,
-      address_type: selectedType,
-      address: selected
-    };
-    for (const [name, value] of Object.entries(fields)) {
-      const element = block.querySelector(`[name="${name}"]`);
-      if (element) element.value = value;
-    }
-    block.querySelector('[name="detail_address"]')?.focus();
-  }
-  scope.querySelectorAll('.address-search-btn').forEach((button) => {
-    button.addEventListener('click', () => {
-      const block = button.closest('.address-block');
-      if (!window.daum?.Postcode) {
-        showToast('주소검색 서비스를 불러오지 못했습니다. 인터넷 연결 또는 보안정책을 확인하세요.', 'error');
-        return;
+  // V307: use one Kakao postcode handler for every customer/ledger modal.
+  // This replaces the old low z-index layer that appeared behind the customer modal.
+  scope.querySelectorAll('.address-search-btn, [data-mtf-address-search]').forEach((button) => {
+    if (button.dataset.mtopticsPostcodeV307Bound === '1') return;
+    button.dataset.mtopticsPostcodeV307Bound = '1';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+      if (window.MTOpticsPostcodeV307 && typeof window.MTOpticsPostcodeV307.open === 'function') {
+        window.MTOpticsPostcodeV307.open(button);
+      } else {
+        showToast('주소검색 모듈을 불러오는 중입니다. 잠시 후 다시 누르세요.', 'error');
       }
-      const layer = document.createElement('div');
-      layer.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:18px;';
-      layer.innerHTML = '<div style="width:min(560px,96vw);height:min(640px,86vh);background:#fff;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 70px rgba(15,23,42,.28)"><div style="height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid #e2e8f0"><strong>주소검색</strong><button type="button" data-close-address>닫기</button></div><div data-address-body style="flex:1;min-height:0"></div></div>';
-      document.body.appendChild(layer);
-      layer.querySelector('[data-close-address]').addEventListener('click', () => closeLayer(layer));
-      layer.addEventListener('click', (event) => { if (event.target === layer) closeLayer(layer); });
-      try {
-        new window.daum.Postcode({
-          width: '100%', height: '100%',
-          oncomplete(data) { fillAddress(block, data); closeLayer(layer); },
-          onclose() { closeLayer(layer); }
-        }).embed(layer.querySelector('[data-address-body]'));
-      } catch (error) {
-        closeLayer(layer);
-        showToast('주소검색 창을 열지 못했습니다. 새로고침 후 다시 시도하세요.', 'error');
-      }
-    });
+    }, true);
   });
 }
 
@@ -942,4 +914,4 @@ const renderers = {
 import("/excel-upload-ui-fix.js?v=157").catch(console.error);
 
 // MT_OPTICS_FINAL_FEATURES_LOADER_V306
-import("/final-enhancements-v306.js?v=306-kakao-layer").catch(console.error);
+import("/final-enhancements-v307.js?v=307").catch(console.error);
