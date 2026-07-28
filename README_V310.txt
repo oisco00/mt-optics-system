@@ -1,4 +1,4 @@
-MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V309
+MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V310
 
 반영 요약
 1. Enter 키 오동작 방지: 입력칸에서 Enter를 눌러도 자동 저장/종료/페이지전환이 발생하지 않도록 기본 동작을 차단했습니다.
@@ -18,15 +18,21 @@ MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V309
 
 적용 방법
 1. 이 ZIP을 기존 mt-optics-system 폴더에 덮어쓰기 압축 해제합니다.
-2. APPLY_FINAL_ENHANCEMENTS_V309.cmd를 실행하여 구문 점검을 통과합니다.
+2. APPLY_FINAL_ENHANCEMENTS_V310.cmd를 실행하여 구문 점검을 통과합니다.
 3. GitHub Desktop에서 Commit/Push 합니다.
 4. AWS에서 /var/www/mt-optics로 이동 후 bash ./deploy/github_update를 실행합니다.
 5. 브라우저에서 Ctrl+F5로 새로고침합니다.
 
 
-V309 추가 사항
+V310 추가 사항
 - 거래처/원장 조회를 페이지 단위(10/20/50/100건)로 변경
 - 거래처 검색 입력 후 Enter로 조회 실행
 - 납품처/지역을 독립 거래처 행으로 표시
 - 기존 주소가 있으면 거래처/납품처 목록에 표시
 - 전체보기/페이지 이동 시 로딩 상태를 표시
+
+
+V310 추가 사항
+- 일반 조회(GET) 요청은 서버 rate limit 대상에서 제외하여 화면 전환/전체조회/페이지 이동 시 429 오류가 발생하지 않도록 했습니다.
+- 저장/수정/삭제/엑셀가져오기 등 쓰기 요청만 높은 한도로 보호합니다.
+- 적용 후 PM2 재시작 또는 github_update 실행으로 서버 프로세스를 재기동해야 기존 429 카운터가 초기화됩니다.

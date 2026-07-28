@@ -73,17 +73,25 @@ function createRateLimiter({ windowMs, max, message }) {
   };
 }
 
+// V310: prevent normal screen rendering/search requests from being blocked by the global API limiter.
+// Read-only GET/HEAD/OPTIONS requests are intentionally not rate-limited.
+// Login is still protected by loginLimiter, and write/import requests are protected with a higher operational limit.
 const apiLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: Math.max(Number(process.env.API_RATE_LIMIT_PER_15M || 1200), 100),
-  message: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.'
+  max: Math.max(Number(process.env.API_WRITE_RATE_LIMIT_PER_15M || process.env.API_RATE_LIMIT_PER_15M || 10000), 1000),
+  message: '요청이 일시적으로 많습니다. 저장/삭제/가져오기 작업은 잠시 후 다시 시도하세요.'
 });
 const loginLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: Math.max(Number(process.env.LOGIN_RATE_LIMIT_PER_15M || 20), 5),
   message: '로그인 시도가 너무 많습니다. 15분 후 다시 시도하세요.'
 });
-app.use('/api', apiLimiter);
+app.use('/api', (req, res, next) => {
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+  if (req.path === '/auth/login') return next();
+  return apiLimiter(req, res, next);
+});
 
 function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
