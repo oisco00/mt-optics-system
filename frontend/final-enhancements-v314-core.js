@@ -1,6 +1,6 @@
-// MT_OPTICS_FINAL_FEATURES_V308
+// MT_OPTICS_FINAL_FEATURES_V311
 (() => {
-  const VERSION = '3.0.8';
+  const VERSION = '3.1.1';
   const API_BASE = localStorage.getItem('mt_api_base') || '/api';
   const cache = {
     user: null,
@@ -13,6 +13,9 @@
   };
   const uiState = {
     customerSearch: '',
+    customerPage: 1,
+    customerPageSize: Number(localStorage.getItem('mt_customer_page_size') || 20),
+    customerTotal: 0,
     highlightCustomerId: null,
     orderFilters: {
       q: '',
@@ -285,10 +288,10 @@
   }
 
   function injectStyles() {
-    if (document.getElementById('mt-final-styles-v308')) return;
+    if (document.getElementById('mt-final-styles-v310')) return;
 
     const style = document.createElement('style');
-    style.id = 'mt-final-styles-v308';
+    style.id = 'mt-final-styles-v310';
     style.textContent = `
       .mtf-root{display:grid;gap:18px}
       .mtf-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
@@ -342,6 +345,14 @@
       .mtf-query-note{display:flex;align-items:center;gap:8px;min-height:42px;padding:10px 12px;border:1px dashed #cbd5e1;border-radius:10px;color:#64748b;background:#f8fafc}
       .mtf-loading{display:flex;align-items:center;justify-content:center;gap:10px;padding:28px;color:#475569}
       .mtf-loading::before{content:'';width:18px;height:18px;border:3px solid #cbd5e1;border-top-color:#2563eb;border-radius:50%;animation:mtfSpin .75s linear infinite}
+
+      .mtf-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:12px}
+      .mtf-pager-pages{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+      .mtf-page-btn{border:1px solid #cbd5e1;background:#fff;border-radius:8px;min-width:34px;height:34px;padding:0 10px;font-weight:800;cursor:pointer;color:#334155}
+      .mtf-page-btn.active{background:#2563eb;color:#fff;border-color:#2563eb}
+      .mtf-page-btn:disabled{opacity:.45;cursor:not-allowed}
+      .mtf-page-size{display:flex;align-items:center;gap:6px;color:#475569;font-weight:700}
+      .mtf-address-cell{max-width:280px;white-space:normal;line-height:1.35;color:#334155}
       @keyframes mtfSpin{to{transform:rotate(360deg)}}
       .mtf-modal-backdrop{position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:24px}
       .mtf-modal{width:min(980px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:18px;box-shadow:0 28px 80px rgba(15,23,42,.38)}
@@ -805,6 +816,55 @@
       formatPhone(row.phone || row.customer_phone || row.site_phone || row.mobile),
       formatBusinessNo(row.business_no || row.customer_business_no)
     ].filter(Boolean).join(' · ');
+  }
+
+
+  function customerAddressText(row = {}) {
+    const base = String(row.address || row.road_address || row.jibun_address || '').trim();
+    const detail = String(row.detail_address || '').trim();
+    if (base && detail && !base.includes(detail)) return `${base} ${detail}`;
+    return base || detail || '';
+  }
+
+  function customerBranchLabel(row = {}) {
+    if (row.record_type === 'site') return row.site_name || row.region || '납품처';
+    return '본점/기본';
+  }
+
+  function customerPagerHtml({ page, pageSize, total }) {
+    const totalPages = Math.max(Math.ceil(Number(total || 0) / Number(pageSize || 20)), 1);
+    const current = Math.min(Math.max(Number(page || 1), 1), totalPages);
+    const start = Math.max(1, current - 2);
+    const end = Math.min(totalPages, current + 2);
+    const pages = [];
+    if (start > 1) pages.push(1);
+    if (start > 2) pages.push('...');
+    for (let i = start; i <= end; i += 1) pages.push(i);
+    if (end < totalPages - 1) pages.push('...');
+    if (end < totalPages) pages.push(totalPages);
+    return `
+      <div class="mtf-pager" data-customer-pager>
+        <div class="mtf-page-size">
+          <span>페이지당</span>
+          <select class="mtf-select" style="width:92px" data-customer-page-size>
+            ${[10, 20, 50, 100].map((n) => `<option value="${n}" ${Number(pageSize) === n ? 'selected' : ''}>${n}건</option>`).join('')}
+          </select>
+          <span>전체 ${money(total)}건 · ${money(current)} / ${money(totalPages)}쪽</span>
+        </div>
+        <div class="mtf-pager-pages">
+          <button type="button" class="mtf-page-btn" data-customer-page="${current - 1}" ${current <= 1 ? 'disabled' : ''}>이전</button>
+          ${pages.map((item) => item === '...'
+            ? '<span class="mtf-sub" style="padding:0 4px">…</span>'
+            : `<button type="button" class="mtf-page-btn ${item === current ? 'active' : ''}" data-customer-page="${item}">${item}</button>`
+          ).join('')}
+          <button type="button" class="mtf-page-btn" data-customer-page="${current + 1}" ${current >= totalPages ? 'disabled' : ''}>다음</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function customerLoadingHtml(message = '거래처 자료를 불러오는 중입니다...') {
+    return `<div class="mtf-card"><div class="mtf-loading">${escapeHtml(message)}</div></div>`;
   }
 
   function customerSearchValues(row = {}) {
@@ -1616,6 +1676,11 @@
                    value="${escapeHtml(row?.site_name || '')}">
           </div>
           <div class="mtf-field">
+            <label>사업자등록번호</label>
+            <input class="mtf-input" name="business_no"
+                   value="${escapeHtml(row?.business_no || '')}">
+          </div>
+          <div class="mtf-field">
             <label>지역</label>
             <input class="mtf-input" name="region"
                    value="${escapeHtml(row?.region || '')}">
@@ -1698,22 +1763,48 @@
     const keepSearchFocus = document.activeElement?.id === 'mtf-customer-search';
     const token = ++activeRenderToken;
     const q = uiState.customerSearch || '';
-    const rows = await api(
-      `/final/customers?q=${encodeURIComponent(q)}&limit=${q ? 2000 : 10000}`
+    const pageSize = Number(uiState.customerPageSize || 20);
+    const page = Math.max(Number(uiState.customerPage || 1), 1);
+    const offset = (page - 1) * pageSize;
+
+    const hasFrame = Boolean(el.querySelector('[data-mtf-view="customers-v310"]'));
+    if (!hasFrame) {
+      el.innerHTML = `
+        <div class="mtf-root" data-mtf-view="customers-v310">
+          <div class="mtf-head"><div><h1>거래처/원장</h1><p>거래처와 납품장소를 독립 단위로 조회합니다.</p></div></div>
+          ${customerLoadingHtml()}
+        </div>
+      `;
+    }
+
+    const data = await api(
+      `/final/customer-branches?q=${encodeURIComponent(q)}&limit=${pageSize}&offset=${offset}`
     );
     if (token !== activeRenderToken || activePage() !== 'customers') return;
 
-    cache.customers = q ? cache.customers : rows;
+    const rows = Array.isArray(data) ? data : (data.rows || []);
+    const total = Array.isArray(data) ? rows.length : Number(data.total || 0);
+    uiState.customerTotal = total;
+
+    const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+    if (page > totalPages) {
+      uiState.customerPage = totalPages;
+      return renderCustomers(el, true);
+    }
 
     const totalReceivable = rows.reduce(
       (sum, row) => sum + Number(row.receivable_balance || 0),
       0
     );
+    const pager = customerPagerHtml({ page, pageSize, total });
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="customers-v308">
+      <div class="mtf-root" data-mtf-view="customers-v310">
         <div class="mtf-head">
-          <div><h1>거래처/원장</h1></div>
+          <div>
+            <h1>거래처/원장</h1>
+            <p>거래처명 입력 후 <span class="mtf-key">Enter</span> 또는 조회 버튼으로 검색합니다. 납품장소가 다른 거래처는 독립 행으로 표시합니다.</p>
+          </div>
           <div class="mtf-actions">
             <button class="mtf-btn help" data-page-help>도움말</button>
             ${can('customers.write')
@@ -1723,12 +1814,12 @@
         </div>
 
         <div class="mtf-toolbar">
-          <div class="mtf-filter-grid" style="grid-template-columns:minmax(260px,1fr) auto">
+          <div class="mtf-filter-grid" style="grid-template-columns:minmax(280px,1fr) auto">
             <div class="mtf-field">
               <label>거래처 검색</label>
-              <input class="mtf-input" id="mtf-customer-search"
+              <input class="mtf-input" id="mtf-customer-search" data-mtf-allow-enter
                      value="${escapeHtml(q)}"
-                     placeholder="거래처명, 지역, 전화, 사업자번호를 입력하세요">
+                     placeholder="거래처명, 납품처, 지역, 전화, 사업자번호를 입력 후 Enter">
             </div>
             <div class="mtf-actions">
               <button class="mtf-btn primary" data-customer-search>조회</button>
@@ -1736,59 +1827,74 @@
             </div>
           </div>
           <div class="mtf-summary">
-            <div class="mtf-stat"><span>검색 거래처</span><strong>${money(rows.length)}</strong></div>
-            <div class="mtf-stat"><span>검색 미수금 합계</span><strong>${money(totalReceivable)}원</strong></div>
-            <div class="mtf-stat"><span>택배 미수금</span><strong>${money(rows.reduce((s, r) => s + Number(r.parcel_receivable || 0), 0))}원</strong></div>
-            <div class="mtf-stat"><span>영업방문 미수금</span><strong>${money(rows.reduce((s, r) => s + Number(r.visit_receivable || 0), 0))}원</strong></div>
+            <div class="mtf-stat"><span>전체 거래처/납품장소</span><strong>${money(total)}</strong></div>
+            <div class="mtf-stat"><span>현재 페이지</span><strong>${money(rows.length)}건</strong></div>
+            <div class="mtf-stat"><span>현재 페이지 미수금</span><strong>${money(totalReceivable)}원</strong></div>
+            <div class="mtf-stat"><span>조회 방식</span><strong>${q ? '검색' : '전체'}</strong></div>
           </div>
         </div>
 
         <div class="mtf-card">
-          <div class="mtf-table-wrap">
+          ${pager}
+          <div class="mtf-table-wrap" style="margin-top:12px" data-mtf-customer-table>
             <table class="mtf-table">
               <thead>
                 <tr>
-                  <th>No.</th><th>거래처</th><th>납품처</th><th>전화</th>
-                  <th>미수금</th><th>발송구분별 미수</th><th>상태</th><th>관리</th>
+                  <th>No.</th><th>거래처/납품장소</th><th>구분</th><th>전화</th>
+                  <th>주소</th><th>미수금</th><th>발송구분별 미수</th><th>상태</th><th>관리</th>
                 </tr>
               </thead>
               <tbody>
                 ${rows.length
-                  ? rows.map((customer, index) => `
-                      <tr data-customer-row="${customer.id}"
-                          class="${String(customer.id) === String(uiState.highlightCustomerId) ? 'mtf-highlight' : ''}">
-                        <td>${index + 1}</td>
-                        <td>
-                          <strong>${escapeHtml(customerDisplayName(customer))}</strong>
-                          <span class="mtf-sub">${escapeHtml([
-                            customer.region,
-                            customer.business_no
-                          ].filter(Boolean).join(' · '))}</span>
-                        </td>
-                        <td>${money(customer.site_count || 0)}곳</td>
-                        <td>${escapeHtml(customer.phone || customer.mobile || '')}</td>
-                        <td><strong>${money(customer.receivable_balance)}원</strong></td>
-                        <td>
-                          택배 ${money(customer.parcel_receivable)} /
-                          방문 ${money(customer.visit_receivable)} /
-                          기타 ${money(customer.other_receivable)}
-                        </td>
-                        <td>${statusBadge(customer.status)}</td>
-                        <td>
-                          <div class="mtf-actions">
-                            <button class="mtf-btn small" data-ledger="${customer.id}">원장</button>
-                            <button class="mtf-btn small" data-sites="${customer.id}">납품처</button>
-                            ${can('customers.write')
-                              ? `<button class="mtf-btn small primary" data-edit="${customer.id}">수정</button><button class="mtf-btn small danger" data-delete-customer="${customer.id}">삭제</button>`
-                              : ''}
-                          </div>
-                        </td>
-                      </tr>
-                    `).join('')
-                  : '<tr><td colspan="8" class="mtf-empty">검색 결과가 없습니다.</td></tr>'}
+                  ? rows.map((customer, index) => {
+                      const branchNo = offset + index + 1;
+                      const address = customerAddressText(customer);
+                      const parent = {
+                        ...customer,
+                        id: customer.customer_id || customer.id,
+                        name: customer.parent_customer_name || customer.customer_name || customer.name,
+                        display_name: customer.parent_customer_name || customer.customer_name || customer.name
+                      };
+                      return `
+                        <tr data-customer-row="${escapeHtml(customer.branch_key || customer.id)}"
+                            class="${String(customer.branch_key || customer.id) === String(uiState.highlightCustomerId) ? 'mtf-highlight' : ''}">
+                          <td>${branchNo}</td>
+                          <td>
+                            <strong>${escapeHtml(customerDisplayName(customer))}</strong>
+                            <span class="mtf-sub">${escapeHtml([
+                              customer.parent_customer_name && customer.parent_customer_name !== customerDisplayName(customer) ? `상위 ${customer.parent_customer_name}` : '',
+                              customer.region,
+                              customer.business_no
+                            ].filter(Boolean).join(' · '))}</span>
+                          </td>
+                          <td>${escapeHtml(customerBranchLabel(customer))}</td>
+                          <td>${escapeHtml(formatPhone(customer.phone || customer.mobile || customer.customer_phone) || '')}</td>
+                          <td class="mtf-address-cell">${address ? escapeHtml(address) : '<span class="mtf-sub">주소 미등록</span>'}</td>
+                          <td><strong>${money(customer.receivable_balance)}원</strong></td>
+                          <td>
+                            택배 ${money(customer.parcel_receivable)} /
+                            방문 ${money(customer.visit_receivable)} /
+                            기타 ${money(customer.other_receivable)}
+                          </td>
+                          <td>${statusBadge(customer.status)}</td>
+                          <td>
+                            <div class="mtf-actions">
+                              <button class="mtf-btn small" data-ledger="${parent.id}">원장</button>
+                              ${can('customers.write')
+                                ? customer.record_type === 'site'
+                                  ? `<button class="mtf-btn small primary" data-edit-site-row="${customer.customer_site_id}">수정</button><button class="mtf-btn small danger" data-delete-site-row="${customer.customer_site_id}">삭제</button>`
+                                  : `<button class="mtf-btn small primary" data-edit="${parent.id}">수정</button><button class="mtf-btn small danger" data-delete-customer="${parent.id}">삭제</button>`
+                                : ''}
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')
+                  : '<tr><td colspan="9" class="mtf-empty">검색 결과가 없습니다.</td></tr>'}
               </tbody>
             </table>
           </div>
+          ${pager}
         </div>
       </div>
     `;
@@ -1797,6 +1903,7 @@
     const customerSearchButton = el.querySelector('[data-customer-search]');
     const runCustomerSearch = async () => {
       uiState.customerSearch = search.value.trim();
+      uiState.customerPage = 1;
       await withBusyButton(
         customerSearchButton,
         '조회 중...',
@@ -1804,6 +1911,12 @@
       );
     };
     customerSearchButton.addEventListener('click', runCustomerSearch);
+    search.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      event.stopPropagation();
+      runCustomerSearch();
+    });
     el.querySelector('[data-page-help]').addEventListener('click', () => openPageHelp('customers'));
 
     if (keepSearchFocus) {
@@ -1813,10 +1926,29 @@
       });
     }
 
-    el.querySelector('[data-customer-clear]').addEventListener('click', () => {
+    el.querySelector('[data-customer-clear]').addEventListener('click', async () => {
       uiState.customerSearch = '';
       uiState.highlightCustomerId = null;
-      renderCustomers(el, true);
+      uiState.customerPage = 1;
+      await withBusyButton(el.querySelector('[data-customer-clear]'), '불러오는 중...', () => renderCustomers(el, true));
+    });
+
+    el.querySelectorAll('[data-customer-page]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const pageNo = Number(button.dataset.customerPage);
+        if (!Number.isFinite(pageNo) || pageNo < 1) return;
+        uiState.customerPage = pageNo;
+        await renderCustomers(el, true);
+      });
+    });
+
+    el.querySelectorAll('[data-customer-page-size]').forEach((select) => {
+      select.addEventListener('change', async () => {
+        uiState.customerPageSize = Number(select.value || 20);
+        localStorage.setItem('mt_customer_page_size', String(uiState.customerPageSize));
+        uiState.customerPage = 1;
+        await renderCustomers(el, true);
+      });
     });
 
     el.querySelector('[data-customer-add]')?.addEventListener(
@@ -1825,18 +1957,88 @@
     );
 
     el.querySelectorAll('[data-edit]').forEach((button) => {
-      button.addEventListener('click', () => {
+      button.addEventListener('click', async () => {
         const customer = rows.find(
-          (row) => String(row.id) === button.dataset.edit
+          (row) => String(row.customer_id || row.id) === button.dataset.edit
         );
-        openCustomerModal(customer);
+        if (customer) openCustomerModal({ ...customer, id: customer.customer_id || customer.id });
       });
     });
 
+    el.querySelectorAll('[data-edit-site-row]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const row = rows.find((item) => String(item.customer_site_id) === button.dataset.editSiteRow);
+        if (!row) return;
+        const parent = {
+          id: row.customer_id || row.id,
+          name: row.parent_customer_name || row.customer_name || row.name,
+          display_name: row.parent_customer_name || row.customer_name || row.name
+        };
+        const site = {
+          id: row.customer_site_id,
+          customer_id: row.customer_id,
+          site_name: row.site_name || row.display_name || row.name,
+          original_customer_name: row.original_customer_name,
+          region: row.region,
+          default_delivery_type: row.default_delivery_type || '택배',
+          default_delivery_group: row.default_delivery_group || '기타',
+          phone: row.phone,
+          mobile: row.mobile,
+          business_no: row.business_no,
+          owner_name: row.owner_name,
+          opening_receivable: row.opening_receivable || 0,
+          status: row.status,
+          address: row.address,
+          postal_code: row.postal_code,
+          road_address: row.road_address,
+          jibun_address: row.jibun_address,
+          detail_address: row.detail_address,
+          address_type: row.address_type,
+          memo: row.memo
+        };
+        openSiteModal(parent, site);
+      });
+    });
+
+    el.querySelectorAll('[data-delete-site-row]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const row = rows.find((item) => String(item.customer_site_id) === button.dataset.deleteSiteRow);
+        if (!row) return;
+        try {
+          const check = await api(`/final/customer-sites/${button.dataset.deleteSiteRow}/delete-check`);
+          const isClosed = /폐업\s*$/.test(customerDisplayName(row));
+          if (!check.can_delete && !isClosed) {
+            const lines = [
+              `거래처명: ${customerDisplayName(row)}`,
+              '',
+              '아래 관련 자료가 있어 바로 삭제할 수 없습니다.',
+              `- 주문 자료: ${money(check.orders)}건`,
+              `- 출고 자료: ${money(check.shipments)}건`,
+              `- 수금 자료: ${money(check.payments)}건`,
+              `- 미수/원장 자료: ${money(check.receivable_transactions)}건`,
+              '',
+              "단, 거래처명 끝에 '폐업'이 있는 경우에는 삭제할 수 있습니다."
+            ];
+            window.alert(lines.join('\n'));
+            return;
+          }
+          const reason = window.prompt("납품장소/거래처 삭제 사유를 입력하세요.\n거래처명 끝이 '폐업'인 자료는 삭제 대상입니다.");
+          if (!reason?.trim()) return;
+          await api(`/final/customer-sites/${button.dataset.deleteSiteRow}`, {
+            method: 'DELETE',
+            body: JSON.stringify({ delete_reason: reason.trim(), force_closed: isClosed ? 1 : 0 })
+          });
+          showToast('거래처/납품장소를 삭제 처리했습니다.');
+          await renderCustomers(el, true);
+        } catch (error) {
+          showToast(error.message, 'error');
+        }
+      });
+    });
 
     el.querySelectorAll('[data-delete-customer]').forEach((button) => {
       button.addEventListener('click', async () => {
-        const customer = rows.find((row) => String(row.id) === button.dataset.deleteCustomer);
+        const customer = rows.find((row) => String(row.customer_id || row.id) === button.dataset.deleteCustomer);
         if (!customer) return;
         try {
           const check = await api(`/final/customers/${button.dataset.deleteCustomer}/delete-check`);
@@ -1844,32 +2046,21 @@
             const lines = [
               `거래처명: ${customerDisplayName(customer)}`,
               '',
-              '이 거래처는 관련 자료가 남아 있어 바로 삭제할 수 없습니다.',
-              `- 주문: ${money(check.orders || 0)}건`,
-              `- 출고: ${money(check.shipments || 0)}건`,
-              `- 수금: ${money(check.payments || 0)}건`,
-              `- 미수/원장: ${money(check.receivable_transactions || 0)}건`,
+              '아래 관련 자료가 있어 바로 삭제할 수 없습니다.',
+              `- 주문 자료: ${money(check.orders)}건`,
+              `- 출고 자료: ${money(check.shipments)}건`,
+              `- 수금 자료: ${money(check.payments)}건`,
+              `- 미수/원장 자료: ${money(check.receivable_transactions)}건`,
               '',
-              '주문/출고/수금/원장 자료를 먼저 정리한 뒤 다시 삭제하세요.'
+              '주문·출고·수금·원장 자료를 먼저 정리한 뒤 삭제하세요.'
             ];
             window.alert(lines.join('\n'));
             return;
           }
-          const ok = await confirmModal(
-            '거래처 삭제',
-            `${customerDisplayName(customer)} 거래처를 삭제하시겠습니까?\n관련 주문·출고·수금 자료가 없는 경우에만 삭제됩니다.`,
-            '거래처 삭제'
-          );
-          if (!ok) return;
-          const reason = window.prompt('거래처 삭제 사유를 입력하세요.\n수정이력에 영구 기록됩니다.');
+          const reason = window.prompt('거래처 삭제 사유를 입력하세요.\n삭제 이력은 수정이력에 기록됩니다.');
           if (!reason?.trim()) return;
-          await api(`/final/customers/${button.dataset.deleteCustomer}`, {
-            method: 'DELETE',
-            body: JSON.stringify({ delete_reason: reason.trim() })
-          });
+          await api(`/final/customers/${button.dataset.deleteCustomer}`, { method: 'DELETE', body: JSON.stringify({ delete_reason: reason.trim() }) });
           showToast('거래처를 삭제 처리했습니다.');
-          cache.customers = null;
-          uiState.highlightCustomerId = null;
           await renderCustomers(el, true);
         } catch (error) {
           showToast(error.message, 'error');
@@ -1879,764 +2070,17 @@
 
     el.querySelectorAll('[data-ledger]').forEach((button) => {
       button.addEventListener('click', () => {
-        const customer = rows.find(
-          (row) => String(row.id) === button.dataset.ledger
-        );
-        openCustomerLedger(customer);
+        const customer = rows.find((row) => String(row.customer_id || row.id) === button.dataset.ledger);
+        if (customer) openCustomerLedger({ ...customer, id: customer.customer_id || customer.id });
       });
     });
 
     el.querySelectorAll('[data-sites]').forEach((button) => {
       button.addEventListener('click', () => {
-        const customer = rows.find(
-          (row) => String(row.id) === button.dataset.sites
-        );
-        openCustomerSites(customer);
+        const customer = rows.find((row) => String(row.customer_id || row.id) === button.dataset.sites);
+        if (customer) openCustomerSites({ ...customer, id: customer.customer_id || customer.id, name: customer.parent_customer_name || customer.customer_name || customer.name });
       });
     });
-
-    if (uiState.highlightCustomerId) {
-      requestAnimationFrame(() => {
-        el.querySelector(
-          `[data-customer-row="${uiState.highlightCustomerId}"]`
-        )?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      });
-    }
-  }
-
-  function orderFilterQuery() {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(uiState.orderFilters)) {
-      if (value) params.set(key, value);
-    }
-    return params.toString();
-  }
-
-  async function renderOrders(el) {
-    if (!el) return;
-    const token = ++activeRenderToken;
-    await applyDateDefaults('orders');
-    const [rows, customers] = await Promise.all([
-      api(`/final/orders?${orderFilterQuery()}`),
-      loadCustomers()
-    ]);
-    if (token !== activeRenderToken || activePage() !== 'orders') return;
-
-    const totalAmount = rows.reduce(
-      (sum, row) => sum + Number(row.total_amount || 0),
-      0
-    );
-    const remaining = rows.reduce(
-      (sum, row) => sum + Number(row.remaining_qty || 0),
-      0
-    );
-
-    el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="orders-v308">
-        <div class="mtf-head">
-          <div><h1>주문/출고</h1></div>
-          <div class="mtf-actions">
-            <button class="mtf-btn help" data-page-help>도움말</button>
-            <button class="mtf-btn" data-order-period-report>기간별 내역서</button>
-            ${can('orders.write')
-              ? `
-                <button class="mtf-btn primary" data-order-add>주문 등록</button>
-                <button class="mtf-btn success" data-quick-ship>주문+즉시출고</button>
-              `
-              : ''}
-          </div>
-        </div>
-
-        <div class="mtf-toolbar">
-          <div class="mtf-filter-grid">
-            <div class="mtf-field">
-              <label>기간 시작</label>
-              <input class="mtf-input" type="date" id="mtf-order-from"
-                     value="${escapeHtml(uiState.orderFilters.date_from)}">
-            </div>
-            <div class="mtf-field">
-              <label>기간 종료</label>
-              <input class="mtf-input" type="date" id="mtf-order-to"
-                     value="${escapeHtml(uiState.orderFilters.date_to)}">
-            </div>
-            ${customerAutocompleteHtml({
-              id: 'mtf-order-customer-filter',
-              label: '거래처',
-              value: uiState.orderFilters.customer_q,
-              customerId: uiState.orderFilters.customer_id,
-              placeholder: '전체 또는 거래처명 입력'
-            })}
-            <div class="mtf-field">
-              <label>발송구분</label>
-              <select class="mtf-select" id="mtf-order-delivery">
-                <option value="">전체</option>
-                ${['택배', '영업방문', '기타'].map((value) => `
-                  <option value="${value}"
-                          ${uiState.orderFilters.delivery_type === value ? 'selected' : ''}>
-                    ${value}
-                  </option>
-                `).join('')}
-              </select>
-            </div>
-            <div class="mtf-field">
-              <label>상태</label>
-              <select class="mtf-select" id="mtf-order-status">
-                <option value="">전체</option>
-                ${[
-                  ['draft', '임시'],
-                  ['confirmed', '주문확정'],
-                  ['packed', '포장'],
-                  ['shipped', '출고'],
-                  ['delivered', '납품완료'],
-                  ['canceled', '취소']
-                ].map(([value, label]) => `
-                  <option value="${value}"
-                          ${uiState.orderFilters.status === value ? 'selected' : ''}>
-                    ${label}
-                  </option>
-                `).join('')}
-              </select>
-            </div>
-            <div class="mtf-field">
-              <label>주문번호/박싱/메모</label>
-              <input class="mtf-input" id="mtf-order-q"
-                     value="${escapeHtml(uiState.orderFilters.q)}"
-                     placeholder="포함 검색">
-            </div>
-          </div>
-
-          <div class="mtf-actions">
-            <button class="mtf-btn primary" data-order-search>조회</button>
-            <button class="mtf-btn" data-order-reset>조건 초기화</button>
-          </div>
-
-          <div class="mtf-summary">
-            <div class="mtf-stat"><span>조회 주문</span><strong>${money(rows.length)}</strong></div>
-            <div class="mtf-stat"><span>주문금액</span><strong>${money(totalAmount)}원</strong></div>
-            <div class="mtf-stat"><span>미출고 수량</span><strong>${money(remaining)}</strong></div>
-            <div class="mtf-stat"><span>미출고 주문</span><strong>${money(rows.filter((row) => Number(row.remaining_qty) > 0).length)}</strong></div>
-          </div>
-        </div>
-
-        <div class="mtf-card">
-          <div class="mtf-table-wrap">
-            <table class="mtf-table">
-              <thead>
-                <tr>
-                  <th>일자</th><th>주문번호</th><th>거래처/납품처</th>
-                  <th>발송구분</th><th>박싱</th><th>상태</th>
-                  <th>품목</th><th>미출고</th><th>금액</th><th>관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows.length
-                  ? rows.map((order) => `
-                      <tr>
-                        <td>${fmtDate(order.order_date)}</td>
-                        <td>${escapeHtml(order.order_no)}</td>
-                        <td>
-                          <strong>${escapeHtml(customerDisplayName(order))}</strong>
-                          <span class="mtf-sub">${escapeHtml(order.site_name || order.region || '')}</span>
-                        </td>
-                        <td>${escapeHtml(order.delivery_type || order.delivery_method || '')}</td>
-                        <td>${escapeHtml(order.delivery_group || '')}</td>
-                        <td>${statusBadge(order.status)}</td>
-                        <td>${money(order.item_count)}</td>
-                        <td>
-                          ${Number(order.remaining_qty) > 0
-                            ? `<strong style="color:#b45309">${money(order.remaining_qty)}</strong>`
-                            : '0'}
-                        </td>
-                        <td>${money(order.total_amount)}원</td>
-                        <td>
-                          <div class="mtf-actions">
-                            <button class="mtf-btn small" data-order-view="${order.id}">상세</button>
-                            <button class="mtf-btn small" data-order-statement="${order.id}">거래명세서</button>
-                            ${can('orders.write')
-                              ? `
-                                <button class="mtf-btn small primary" data-order-edit="${order.id}">수정</button>
-                                ${Number(order.remaining_qty) > 0
-                                  ? `<button class="mtf-btn small success" data-order-ship="${order.id}">미출고 출고</button>`
-                                  : ''}
-                                <button class="mtf-btn small warning" data-order-cancel="${order.id}">취소</button>
-                                <button class="mtf-btn small danger" data-order-delete="${order.id}">삭제</button>
-                              `
-                              : ''}
-                          </div>
-                        </td>
-                      </tr>
-                    `).join('')
-                  : '<tr><td colspan="10" class="mtf-empty">조회 결과가 없습니다.</td></tr>'}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    `;
-
-    bindCustomerAutocomplete(el, customers);
-    const orderCustomerWrapper = el.querySelector(
-      '[data-mtf-ac="mtf-order-customer-filter"]'
-    );
-    const orderCustomerHidden = orderCustomerWrapper?.querySelector('[data-mtf-ac-value]');
-    orderCustomerWrapper?.addEventListener(
-      'mtf-customer-selected',
-      (event) => {
-        uiState.orderFilters.customer_id = event.detail?.id || '';
-        uiState.orderFilters.customer_q = event.detail ? customerDisplayName(event.detail) : '';
-      }
-    );
-    orderCustomerWrapper?.querySelector('[data-mtf-ac-input]')?.addEventListener(
-      'input',
-      () => { uiState.orderFilters.customer_id = ''; }
-    );
-
-    const runOrderSearch = () => {
-      uiState.orderFilters.date_from =
-        el.querySelector('#mtf-order-from').value;
-      uiState.orderFilters.date_to =
-        el.querySelector('#mtf-order-to').value;
-      uiState.orderFilters.delivery_type =
-        el.querySelector('#mtf-order-delivery').value;
-      uiState.orderFilters.status =
-        el.querySelector('#mtf-order-status').value;
-      uiState.orderFilters.q =
-        el.querySelector('#mtf-order-q').value.trim();
-      uiState.orderFilters.customer_q =
-        el.querySelector('#mtf-order-customer-filter').value.trim();
-      uiState.orderFilters.customer_id = orderCustomerHidden?.value || '';
-      return renderOrders(el);
-    };
-
-    const orderSearchButton = el.querySelector('[data-order-search]');
-    const runOrderSearchWithBusy = () => withBusyButton(
-      orderSearchButton,
-      '조회 중...',
-      runOrderSearch
-    );
-    orderSearchButton.addEventListener('click', runOrderSearchWithBusy);
-    bindEnterAction(
-      el,
-      '#mtf-order-from,#mtf-order-to,#mtf-order-customer-filter,#mtf-order-delivery,#mtf-order-status,#mtf-order-q',
-      runOrderSearchWithBusy
-    );
-    el.querySelector('[data-page-help]').addEventListener('click', () => openPageHelp('orders'));
-
-    el.querySelector('[data-order-reset]').addEventListener('click', () => {
-      uiState.orderFilters = {
-        q: '',
-        date_from: '',
-        date_to: today(),
-        customer_q: '',
-        customer_id: '',
-        delivery_type: '',
-        status: ''
-      };
-      renderOrders(el);
-    });
-
-    el.querySelector('[data-order-add]')?.addEventListener(
-      'click',
-      () => openOrderForm({ quickShip: false })
-    );
-    el.querySelector('[data-quick-ship]')?.addEventListener(
-      'click',
-      () => openOrderForm({ quickShip: true })
-    );
-
-    el.querySelectorAll('[data-order-view]').forEach((button) => {
-      button.addEventListener(
-        'click',
-        () => openOrderDetail(button.dataset.orderView)
-      );
-    });
-
-
-    el.querySelectorAll('[data-order-statement]').forEach((button) => {
-      button.addEventListener('click', () => printTransactionStatement(button.dataset.orderStatement));
-    });
-
-    el.querySelector('[data-order-period-report]')?.addEventListener('click', async () => {
-      try {
-        const report = await api(`/final/reports/order-shipments?${orderFilterQuery()}`);
-        printOrderShipmentReport(report);
-      } catch (error) {
-        showToast(error.message, 'error');
-      }
-    });
-    el.querySelectorAll('[data-order-edit]').forEach((button) => {
-      button.addEventListener(
-        'click',
-        () => openOrderForm({
-          orderId: button.dataset.orderEdit,
-          quickShip: false
-        })
-      );
-    });
-    el.querySelectorAll('[data-order-ship]').forEach((button) => {
-      button.addEventListener(
-        'click',
-        () => openShipModal(button.dataset.orderShip)
-      );
-    });
-    el.querySelectorAll('[data-order-cancel]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const ok = await confirmModal(
-          '주문 취소',
-          '주문을 취소하고 매출 미수금도 반대로 조정할까요?',
-          '주문 취소'
-        );
-        if (!ok) return;
-        await api(`/orders/${button.dataset.orderCancel}/status`, {
-          method: 'PUT',
-          body: JSON.stringify({ status: 'canceled' })
-        });
-        showToast('주문을 취소했습니다.');
-        renderOrders(el);
-      });
-    });
-    el.querySelectorAll('[data-order-delete]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const order = rows.find((row) => String(row.id) === button.dataset.orderDelete);
-        try {
-          const check = await api(`/final/orders/${button.dataset.orderDelete}/delete-check`);
-          const relatedText = [
-            `주문번호: ${order?.order_no || check.order_no || ''}`,
-            `품목: ${money(check.order_items || 0)}건`,
-            `출고: ${money(check.shipments || 0)}건`,
-            `출고수량: ${money(check.shipped_qty || 0)}`,
-            `미수/원장: ${money(check.receivable_transactions || 0)}건`,
-            `연결 수금: ${money(check.linked_payments || 0)}건`,
-            `재고이력: ${money(check.inventory_transactions || 0)}건`
-          ].join('\n');
-          const ok = await confirmModal(
-            '주문/출고 삭제 확인',
-            `${relatedText}\n\n삭제하면 출고수량은 재고로 복원하고, 주문 관련 출고·미수 원장 연결자료를 정리한 뒤 주문을 삭제 상태로 전환합니다. 계속하시겠습니까?`,
-            '정리 후 삭제'
-          );
-          if (!ok) return;
-          const reason = window.prompt('주문 삭제 사유를 입력하세요.\n수정이력에 영구 기록됩니다.');
-          if (!reason?.trim()) return;
-          await api(`/final/orders/${button.dataset.orderDelete}`, {
-            method: 'DELETE',
-            body: JSON.stringify({ delete_reason: reason.trim(), confirm_cleanup: true })
-          });
-          showToast('주문 관련 자료를 정리하고 삭제 처리했습니다.');
-          renderOrders(el);
-        } catch (error) {
-          showToast(error.message, 'error');
-        }
-      });
-    });
-  }
-
-  function itemRowsHtml(items, products) {
-    return items.map((item, index) => `
-      <div class="mtf-item-row" data-item-index="${index}">
-        <div class="mtf-field mtf-product">
-          <label>제품</label>
-          <select class="mtf-select" name="product_id">
-            <option value="">직접입력</option>
-            ${products.map((product) => `
-              <option value="${product.id}"
-                      ${String(item.product_id || '') === String(product.id) ? 'selected' : ''}>
-                ${escapeHtml(`${product.name} · ${product.sku || ''} · 재고 ${product.current_stock || 0}`)}
-              </option>
-            `).join('')}
-          </select>
-        </div>
-        <div class="mtf-field">
-          <label>수량</label>
-          <input class="mtf-input" type="text" inputmode="numeric" data-mtf-number-format name="quantity"
-                 value="${escapeHtml(item.quantity || 1)}">
-        </div>
-        <div class="mtf-field">
-          <label>단가</label>
-          <input class="mtf-input" type="text" inputmode="numeric" data-mtf-number-format name="unit_price"
-                 value="${escapeHtml(wonInputValue(item.unit_price || 0))}">
-        </div>
-        <div class="mtf-field">
-          <label>품목명</label>
-          <input class="mtf-input" name="item_name"
-                 value="${escapeHtml(item.item_name || '')}">
-        </div>
-        <button type="button" class="mtf-btn danger small"
-                data-remove-item="${index}">삭제</button>
-        <input type="hidden" name="spec" value="${escapeHtml(item.spec || '')}">
-      </div>
-    `).join('');
-  }
-
-  async function openOrderForm({
-    orderId = null,
-    quickShip = false
-  } = {}) {
-    const [customers, sites, products, carriers] = await Promise.all([
-      loadCustomers(),
-      loadSites(),
-      loadProducts(),
-      loadCarriers()
-    ]);
-
-    let order = null;
-    let shipments = [];
-    let items = [{
-      product_id: products[0]?.id || '',
-      item_name: products[0]?.name || '',
-      spec: products[0]?.spec || '',
-      quantity: 1,
-      unit_price: products[0]?.default_price || 0
-    }];
-
-    if (orderId) {
-      const detail = await api(`/orders/${orderId}`);
-      order = detail.order;
-      shipments = detail.shipments || [];
-      if (shipments.length) {
-        showToast('출고 이력이 있는 주문은 직접 수정할 수 없습니다.', 'error');
-        return;
-      }
-      items = detail.items.map((item) => ({
-        product_id: item.product_id || '',
-        item_name: item.item_name || '',
-        spec: item.spec || '',
-        quantity: Number(item.quantity || 1),
-        unit_price: Number(item.unit_price || 0)
-      }));
-    }
-
-    const title = quickShip
-      ? '주문등록과 즉시출고'
-      : orderId
-        ? `주문 수정 ${order.order_no}`
-        : '주문 등록';
-
-    const modal = openModal(
-      title,
-      `
-        <div class="mtf-form-grid">
-          ${customerAutocompleteHtml({
-            id: 'mtf-order-form-customer',
-            label: '거래처',
-            value: order?.customer_name || '',
-            customerId: order?.customer_id || '',
-            required: true
-          })}
-          <div class="mtf-field">
-            <label>납품처/지역</label>
-            <select class="mtf-select" name="customer_site_id"
-                    id="mtf-order-form-site">
-              ${siteOptions(sites, order?.customer_id || '', order?.customer_site_id || '')}
-            </select>
-          </div>
-          <div class="mtf-field">
-            <label>발송구분</label>
-            <select class="mtf-select" name="delivery_type"
-                    id="mtf-order-form-delivery">
-              ${['택배', '영업방문', '기타'].map((value) => `
-                <option value="${value}"
-                        ${(order?.delivery_type || '택배') === value ? 'selected' : ''}>
-                  ${value}
-                </option>
-              `).join('')}
-            </select>
-          </div>
-          <div class="mtf-field">
-            <label>주문일</label>
-            <input class="mtf-input" type="date" name="order_date"
-                   value="${escapeHtml(order?.order_date ? fmtDate(order.order_date) : today())}">
-          </div>
-          <div class="mtf-field">
-            <label>접수경로</label>
-            <select class="mtf-select" name="source">
-              ${[
-                ['phone', '전화'],
-                ['kakao', '카톡'],
-                ['sales_visit', '영업방문'],
-                ['ecount', '이카운트'],
-                ['direct_ship', '즉시출고'],
-                ['other', '기타']
-              ].map(([value, label]) => `
-                <option value="${value}"
-                        ${(order?.source || (quickShip ? 'direct_ship' : 'phone')) === value ? 'selected' : ''}>
-                  ${label}
-                </option>
-              `).join('')}
-            </select>
-          </div>
-          <div class="mtf-field">
-            <label>박싱구분</label>
-            <select class="mtf-select" name="delivery_group">
-              ${['영업부', '다빈치', '기타'].map((value) => `
-                <option value="${value}"
-                        ${(order?.delivery_group || '기타') === value ? 'selected' : ''}>
-                  ${value}
-                </option>
-              `).join('')}
-            </select>
-          </div>
-          <div class="mtf-field">
-            <label>배송방법</label>
-            <select class="mtf-select" name="delivery_method">
-              ${['택배', '영업방문', '직접수령', '기타'].map((value) => `
-                <option value="${value}"
-                        ${(order?.delivery_method || '택배') === value ? 'selected' : ''}>
-                  ${value}
-                </option>
-              `).join('')}
-            </select>
-          </div>
-          <div class="mtf-field">
-            <label>부가세</label>
-            <input class="mtf-input" type="text" inputmode="numeric" data-mtf-number-format name="vat_amount"
-                   value="${escapeHtml(wonInputValue(order?.vat_amount || 0))}">
-          </div>
-          ${orderId
-            ? `
-              <div class="mtf-field">
-                <label>수정 사유(선택)</label>
-                <input class="mtf-input" name="change_reason">
-              </div>
-            `
-            : ''}
-          ${quickShip
-            ? `
-              <div class="mtf-field">
-                <label>택배사</label>
-                <div style="display:flex;gap:6px">
-                  <select class="mtf-select" name="carrier">${carrierOptions(carriers)}</select>
-                  <button type="button" class="mtf-btn small" data-carrier-add>추가</button>
-                </div>
-              </div>
-              <div class="mtf-field">
-                <label>송장번호</label>
-                <input class="mtf-input" name="invoice_no">
-              </div>
-              <div class="mtf-field">
-                <label>확인자</label>
-                <input class="mtf-input" name="receiver_name">
-              </div>
-            `
-            : ''}
-          <div class="mtf-field mtf-span-3">
-            <label>품목</label>
-            <div class="mtf-items" id="mtf-order-items"></div>
-            <button type="button" class="mtf-btn" data-add-item
-                    style="margin-top:8px">품목 추가</button>
-          </div>
-          <div class="mtf-field mtf-span-3">
-            <label>메모</label>
-            <textarea class="mtf-textarea" name="memo">${escapeHtml(order?.memo || '')}</textarea>
-          </div>
-        </div>
-      `,
-      {
-        submitText: quickShip
-          ? '주문등록 후 즉시출고'
-          : orderId
-            ? '수정 저장'
-            : '주문 저장',
-        onSubmit: async (form) => {
-          const data = formObject(form);
-          const customerId = form.querySelector(
-            '[name="customer_id"]'
-          ).value;
-          if (!customerId) throw new Error('거래처를 선택하세요.');
-
-          const savedItems = [...form.querySelectorAll('[data-item-index]')]
-            .map((row) => ({
-              product_id: row.querySelector('[name="product_id"]').value || null,
-              item_name: row.querySelector('[name="item_name"]').value || null,
-              spec: row.querySelector('[name="spec"]').value || null,
-              quantity: integerWon(row.querySelector('[name="quantity"]').value || 0),
-              unit_price: integerWon(row.querySelector('[name="unit_price"]').value || 0)
-            }))
-            .filter((item) => item.product_id || item.item_name);
-
-          if (!savedItems.length) {
-            throw new Error('품목을 1개 이상 입력하세요.');
-          }
-
-          const payload = {
-            ...data,
-            customer_id: customerId,
-            items: savedItems
-          };
-
-          if (quickShip) {
-            await api('/final/quick-order-ship', {
-              method: 'POST',
-              body: JSON.stringify(payload)
-            });
-            showToast('주문등록과 출고를 동시에 완료했습니다.');
-          } else {
-            await api(orderId ? `/orders/${orderId}` : '/orders', {
-              method: orderId ? 'PUT' : 'POST',
-              body: JSON.stringify(payload)
-            });
-            showToast(orderId ? '주문을 수정했습니다.' : '주문을 등록했습니다.');
-          }
-
-          closeModal();
-          await renderOrders(contentElement());
-        }
-      }
-    );
-
-    bindCustomerAutocomplete(modal, customers);
-    const siteSelect = modal.querySelector('#mtf-order-form-site');
-    const deliverySelect = modal.querySelector('#mtf-order-form-delivery');
-
-    modal.querySelector('[data-mtf-ac]')?.addEventListener(
-      'mtf-customer-selected',
-      (event) => {
-        const customer = event.detail;
-        siteSelect.innerHTML = siteOptions(sites, customer?.id || '');
-        if (!customer) {
-          deliverySelect.value = '택배';
-          return;
-        }
-        const first = sites.find(
-          (site) => String(site.customer_id) === String(customer.id)
-        );
-        if (first) {
-          siteSelect.value = first.id;
-          deliverySelect.value = first.default_delivery_type || '택배';
-        }
-      }
-    );
-
-    siteSelect.addEventListener('change', () => {
-      const site = sites.find(
-        (row) => String(row.id) === String(siteSelect.value)
-      );
-      if (site?.default_delivery_type) {
-        deliverySelect.value = site.default_delivery_type;
-      }
-    });
-
-    const wrap = modal.querySelector('#mtf-order-items');
-
-    function renderItems() {
-      wrap.innerHTML = itemRowsHtml(items, products);
-      bindNumericFormatting(wrap);
-      wrap.querySelectorAll('[name="product_id"]').forEach((select) => {
-        select.addEventListener('change', () => {
-          const row = select.closest('[data-item-index]');
-          const index = Number(row.dataset.itemIndex);
-          const product = products.find(
-            (item) => String(item.id) === select.value
-          );
-          if (product) {
-            items[index] = {
-              ...items[index],
-              product_id: product.id,
-              item_name: product.name,
-              spec: product.spec || '',
-              unit_price: Number(product.default_price || 0)
-            };
-            renderItems();
-          }
-        });
-      });
-      wrap.querySelectorAll('input').forEach((input) => {
-        input.addEventListener('input', () => {
-          const row = input.closest('[data-item-index]');
-          const index = Number(row.dataset.itemIndex);
-          items[index] = {
-            ...items[index],
-            quantity: integerWon(row.querySelector('[name="quantity"]').value || 0),
-            unit_price: integerWon(row.querySelector('[name="unit_price"]').value || 0),
-            item_name: row.querySelector('[name="item_name"]').value,
-            spec: row.querySelector('[name="spec"]').value
-          };
-        });
-      });
-      wrap.querySelectorAll('[data-remove-item]').forEach((button) => {
-        button.addEventListener('click', () => {
-          items.splice(Number(button.dataset.removeItem), 1);
-          if (!items.length) {
-            items.push({
-              product_id: '',
-              item_name: '',
-              spec: '',
-              quantity: 1,
-              unit_price: 0
-            });
-          }
-          renderItems();
-        });
-      });
-    }
-
-    modal.querySelector('[data-add-item]').addEventListener('click', () => {
-      items.push({
-        product_id: '',
-        item_name: '',
-        spec: '',
-        quantity: 1,
-        unit_price: 0
-      });
-      renderItems();
-    });
-
-    renderItems();
-    modal.querySelector('[data-carrier-add]')?.addEventListener('click', () => addCarrierPrompt(modal.querySelector('[name="carrier"]')));
-  }
-
-
-  function printWindowHtml(title, html) {
-    const popup = window.open('', '_blank', 'width=980,height=900,scrollbars=yes,resizable=yes');
-    if (!popup) throw new Error('팝업이 차단되었습니다. 팝업 허용 후 다시 시도하세요.');
-    popup.document.open();
-    popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>${html.styles || ''}</head><body>${html.body || html}</body></html>`);
-    popup.document.close();
-    popup.focus();
-  }
-
-  function statementCopyHtml(data, copyLabel) {
-    const order = data.order || {};
-    const customer = data.customer || {};
-    const items = data.items || [];
-    const rows = items.slice(0, 8);
-    while (rows.length < 8) rows.push({});
-    return `
-      <section class="statement-copy">
-        <div class="copy-label">(${copyLabel})</div>
-        <table class="statement-table">
-          <tr><td class="no-cell">No. ${escapeHtml(order.order_no || '')}</td><td colspan="7" class="title-cell">거 래 명 세 표</td><td class="dear-cell">귀하</td></tr>
-          <tr>
-            <th rowspan="4" class="vertical">공급받는자</th><th>등록번호</th><td colspan="3">${escapeHtml(customer.business_no || '')}</td>
-            <th rowspan="4" class="vertical">공급자</th><th>등록번호</th><td colspan="2">514-04-79741</td>
-          </tr>
-          <tr><th>상호(법인명)</th><td colspan="3">${escapeHtml(customer.name || order.customer_name || '')}</td><th>상호(법인명)</th><td colspan="2">MT옵틱스</td></tr>
-          <tr><th>성명</th><td colspan="3">${escapeHtml(customer.owner_name || '')}</td><th>성명</th><td colspan="2">오 희 숙</td></tr>
-          <tr><th>사업장주소</th><td colspan="3">${escapeHtml(customer.address || customer.road_address || '')}</td><th>사업장주소</th><td colspan="2">대구·북구 노원동3가 1149-1 1층</td></tr>
-          <tr><th colspan="2">전화/FAX</th><td colspan="3">${escapeHtml(customer.phone || customer.mobile || '')}</td><th>전화/FAX</th><td colspan="3">T.053-351-6915 / 053-353-2469<br>F.053-351-2469</td></tr>
-          <tr><th colspan="2">작성년월일</th><td colspan="3">${escapeHtml(fmtDate(order.order_date || today()))}</td><th>공급대가총액</th><td colspan="3">${money(order.total_amount)}원</td></tr>
-          <tr><td colspan="9" class="claim">위 금액을 정히 청구(영수) 함.</td></tr>
-          <tr><th>월</th><th>일</th><th colspan="3">품목</th><th>수량</th><th>단가</th><th colspan="2">공급가액</th></tr>
-          ${rows.map((item) => `<tr><td>${item.item_name ? fmtDate(order.order_date).slice(5,7) : ''}</td><td>${item.item_name ? fmtDate(order.order_date).slice(8,10) : ''}</td><td colspan="3" class="item-name">${escapeHtml(item.item_name || '')}</td><td>${item.item_name ? money(item.quantity) : ''}</td><td>${item.item_name ? money(item.unit_price) : ''}</td><td colspan="2">${item.item_name ? money(item.amount) : ''}</td></tr>`).join('')}
-          <tr><th colspan="3">금일판매액</th><td>${money(data.today_sale_amount)}</td><th colspan="2">전잔액</th><td>${money(data.previous_balance)}</td><th>합계</th><td>${money(data.total_balance)}</td></tr>
-        </table>
-      </section>`;
-  }
-
-  async function printTransactionStatement(orderId) {
-    const data = await api(`/final/orders/${orderId}/statement`);
-    const styles = `<style>
-      @page{size:A4 portrait;margin:8mm} body{font-family:Arial,'Malgun Gothic',sans-serif;margin:0;color:#111} .statement-copy{position:relative;margin:0 0 8mm 0;page-break-inside:avoid}.copy-label{position:absolute;right:4mm;top:1mm;font-size:12px}.statement-table{width:100%;border-collapse:collapse;table-layout:fixed}.statement-table th,.statement-table td{border:1px solid #222;padding:4px 5px;font-size:12px;height:22px;text-align:center;vertical-align:middle}.title-cell{font-size:25px;font-weight:900;letter-spacing:8px;height:36px}.no-cell{text-align:left}.dear-cell{text-align:right}.vertical{width:28px;writing-mode:vertical-rl;letter-spacing:3px}.claim{font-weight:700}.item-name{text-align:left!important;padding-left:8px!important}@media print{button{display:none}}
-      .print-actions{margin:10px}.print-actions button{padding:8px 14px;font-weight:700}
-    </style>`;
-    const body = `<div class="print-actions"><button onclick="window.print()">인쇄</button></div>` + statementCopyHtml(data, '공급받는자용') + statementCopyHtml(data, '공급자용');
-    printWindowHtml('거래명세서', { styles, body });
-  }
-
-  function printOrderShipmentReport(report) {
-    const rows = report.rows || [];
-    const styles = `<style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial,'Malgun Gothic',sans-serif;color:#111}h1{font-size:22px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #333;padding:5px 6px;font-size:12px;text-align:left}th{background:#f1f5f9}.right{text-align:right}.print-actions{margin-bottom:10px}@media print{.print-actions{display:none}}</style>`;
-    const body = `<div class="print-actions"><button onclick="window.print()">인쇄</button></div><h1>기간별 주문 및 출하 내역서</h1><p>기간: ${escapeHtml(report.date_from || '')} ~ ${escapeHtml(report.date_to || '')}</p><table><thead><tr><th>주문일</th><th>주문번호</th><th>거래처</th><th>납품처</th><th>발송구분</th><th>상태</th><th>주문수량</th><th>출고수량</th><th>미출고</th><th>금액</th><th>택배사/송장</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${fmtDate(r.order_date)}</td><td>${escapeHtml(r.order_no||'')}</td><td>${escapeHtml(customerDisplayName(r))}</td><td>${escapeHtml(r.site_name||r.region||'')}</td><td>${escapeHtml(r.delivery_type||'')}</td><td>${escapeHtml(statusLabel(r.status))}</td><td class="right">${money(r.order_qty)}</td><td class="right">${money(r.shipped_qty)}</td><td class="right">${money(r.remaining_qty)}</td><td class="right">${money(r.total_amount)}원</td><td>${escapeHtml([r.carriers,r.invoice_nos].filter(Boolean).join(' / '))}</td></tr>`).join('')}</tbody></table>`;
-    printWindowHtml('기간별 주문 및 출하 내역서', { styles, body });
   }
 
   async function openOrderDetail(orderId) {
@@ -3154,7 +2598,7 @@
       : '발송구분별 미수금은 아래 별도 조건에서 거래처 또는 발송구분을 선택한 뒤 조회하세요.';
 
     el.innerHTML = `
-      <div class="mtf-root" data-mtf-view="payments-v308">
+      <div class="mtf-root" data-mtf-view="payments-v310">
         <div class="mtf-head">
           <div><h1>수금/미수금</h1></div>
           <div class="mtf-actions"><button class="mtf-btn help" data-page-help>도움말</button></div>
@@ -3413,12 +2857,297 @@
   }
 
 
+
+  function orderListQueryV311() {
+    const params = new URLSearchParams();
+    const f = uiState.orderFilters || {};
+    if (f.q) params.set('q', f.q);
+    if (f.customer_q) params.set('customer_q', f.customer_q);
+    if (f.customer_id) params.set('customer_id', f.customer_id);
+    if (f.date_from) params.set('date_from', f.date_from);
+    if (f.date_to) params.set('date_to', f.date_to);
+    if (f.delivery_type) params.set('delivery_type', f.delivery_type);
+    if (f.status) params.set('status', f.status);
+    return params.toString();
+  }
+
+  function orderStatusOptionsV311(selected = '') {
+    return [
+      ['', '전체'],
+      ['draft', '임시'],
+      ['confirmed', '주문확정'],
+      ['packed', '포장'],
+      ['shipped', '출고'],
+      ['delivered', '납품완료'],
+      ['canceled', '취소']
+    ].map(([value, label]) => `<option value="${value}" ${String(selected || '') === value ? 'selected' : ''}>${label}</option>`).join('');
+  }
+
+  async function fetchOrdersForListV311() {
+    const query = orderListQueryV311();
+    const result = await api(`/final/reports/order-shipments?${query}`);
+    return Array.isArray(result) ? result : (result.rows || []);
+  }
+
+  function orderActionButtonsV311(row) {
+    const id = row.id;
+    const canWrite = can('orders.write');
+    return `
+      <div class="mtf-actions mtf-order-actions">
+        <button type="button" class="mtf-btn small" data-order-action="detail" data-order-id="${id}">상세</button>
+        <button type="button" class="mtf-btn small success" data-order-action="statement" data-order-id="${id}">거래명세서</button>
+        ${canWrite ? `
+          <button type="button" class="mtf-btn small primary" data-order-action="edit" data-order-id="${id}">수정</button>
+          <button type="button" class="mtf-btn small success" data-order-action="ship" data-order-id="${id}">미출고 출고</button>
+          <button type="button" class="mtf-btn small warning" data-order-action="cancel" data-order-id="${id}">취소</button>
+          <button type="button" class="mtf-btn small danger" data-order-action="delete" data-order-id="${id}">삭제</button>
+        ` : ''}
+      </div>`;
+  }
+
+  async function openOrderEditModalV311(orderId) {
+    try {
+      const data = await api(`/orders/${orderId}`);
+      if (data.shipments?.length) {
+        showToast('출고 이력이 있는 주문은 화면에서 직접 수정할 수 없습니다.', 'error');
+        return;
+      }
+      if (typeof window.openOrderModal === 'function') {
+        await window.openOrderModal(data);
+        setTimeout(() => {
+          const change = document.querySelector('#modal-root [name="change_reason"], [name="change_reason"]');
+          if (change) {
+            change.removeAttribute('required');
+            change.placeholder = '선택 입력';
+          }
+        }, 0);
+      } else {
+        showToast('주문 수정 함수를 찾지 못했습니다.', 'error');
+      }
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
+  }
+
+  function statementCopyHtmlV311(data, copyLabel) {
+    const order = data.order || {};
+    const customer = data.customer || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    const itemRows = [...items];
+    while (itemRows.length < 7) itemRows.push({});
+    const date = fmtDate(order.order_date || today());
+    const [yyyy, mm, dd] = date.split('-');
+    return `
+      <section class="stmt-copy">
+        <div class="copy-label">(${copyLabel})</div>
+        <table class="stmt-table main">
+          <tr>
+            <td class="no" colspan="2">No. ${escapeHtml(order.order_no || '')}</td>
+            <th class="title" colspan="4">거 래 명 세 표</th>
+            <td class="to" colspan="2">귀하</td>
+          </tr>
+          <tr>
+            <th class="vertical" rowspan="5">공급받는자</th>
+            <th>등록번호</th><td colspan="2">${escapeHtml(customer.business_no || '')}</td>
+            <th class="vertical" rowspan="5">공급자</th>
+            <th>등록번호</th><td colspan="2">514-04-79741</td>
+          </tr>
+          <tr><th>상호(법인명)</th><td colspan="2">${escapeHtml(customer.name || '')}</td><th>상호(법인명)</th><td colspan="2">MT옵틱스</td></tr>
+          <tr><th>성 명</th><td colspan="2">${escapeHtml(customer.owner_name || '')}</td><th>성 명</th><td colspan="2">오 희 숙</td></tr>
+          <tr><th>사업장주소</th><td colspan="2">${escapeHtml(customer.address || '')}</td><th>사업장주소</th><td colspan="2">대구·북구 노원동3가 1149-1 1층</td></tr>
+          <tr><th>전화/FAX</th><td colspan="2">${escapeHtml(customer.phone || '')}</td><th>전화/FAX</th><td colspan="2">T.053-351-6915 / 053-353-2469<br>F.053-351-2469</td></tr>
+          <tr><th colspan="2">작성년월일</th><td colspan="2">${yyyy || ''}년 ${mm || ''}월 ${dd || ''}일</td><th colspan="2">공급대가총액</th><td colspan="2">${money(data.today_sale_amount)}원</td></tr>
+          <tr><td colspan="8" class="center">위 금액을 정히 청구(영수) 함.</td></tr>
+        </table>
+        <table class="stmt-table items">
+          <thead><tr><th>월</th><th>일</th><th>품 목</th><th>수 량</th><th>단 가</th><th>공급가액</th></tr></thead>
+          <tbody>
+            ${itemRows.map((item, idx) => `
+              <tr>
+                <td>${idx === 0 ? (mm || '') : ''}</td>
+                <td>${idx === 0 ? (dd || '') : ''}</td>
+                <td>${escapeHtml(item.item_name || '')}${item.spec ? `<span class="spec"> ${escapeHtml(item.spec)}</span>` : ''}</td>
+                <td class="num">${item.quantity ? money(item.quantity) : ''}</td>
+                <td class="num">${item.unit_price ? money(item.unit_price) : ''}</td>
+                <td class="num">${item.amount ? money(item.amount) : ''}</td>
+              </tr>`).join('')}
+          </tbody>
+          <tfoot>
+            <tr><th colspan="2">금일판매액</th><td class="num">${money(data.today_sale_amount)}</td><th>전잔액</th><td class="num">${money(data.previous_balance)}</td><th class="num">합계 ${money(data.total_balance)}</th></tr>
+          </tfoot>
+        </table>
+      </section>`;
+  }
+
+  function statementDocumentHtmlV311(data) {
+    return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>거래명세서</title>
+      <style>
+        @page{size:A4;margin:8mm}*{box-sizing:border-box}body{margin:0;font-family:Malgun Gothic,Apple SD Gothic Neo,sans-serif;color:#111}.stmt-copy{height:138mm;position:relative;margin-bottom:6mm;page-break-inside:avoid}.copy-label{position:absolute;right:2mm;top:0;font-size:12px}.stmt-table{width:100%;border-collapse:collapse;table-layout:fixed}.stmt-table th,.stmt-table td{border:1px solid #111;padding:3px 5px;font-size:12px;vertical-align:middle}.stmt-table .title{font-size:24px;letter-spacing:12px;height:28px}.stmt-table .no{font-size:12px}.stmt-table .to{text-align:right}.vertical{writing-mode:vertical-rl;text-align:center;width:26px;letter-spacing:4px}.center{text-align:center}.items th{background:#eee}.items td{height:22px}.num{text-align:right}.spec{color:#555;font-size:11px}button.print{position:fixed;right:20px;top:20px;padding:10px 16px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700}@media print{button.print{display:none}.stmt-copy{margin-bottom:3mm}}
+      </style></head><body><button class="print" onclick="window.print()">인쇄</button>${statementCopyHtmlV311(data, '공급받는자용')}${statementCopyHtmlV311(data, '공급자용')}</body></html>`;
+  }
+
+  async function printStatementV311(orderId) {
+    const data = await api(`/final/orders/${orderId}/statement`);
+    const win = window.open('', '_blank', 'width=950,height=1200');
+    if (!win) {
+      showToast('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.', 'error');
+      return;
+    }
+    win.document.open();
+    win.document.write(statementDocumentHtmlV311(data));
+    win.document.close();
+    win.focus();
+  }
+
+  function reportDocumentHtmlV311(report) {
+    const rows = report.rows || [];
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
+    const totalOrderQty = rows.reduce((sum, row) => sum + Number(row.order_qty || 0), 0);
+    const totalShippedQty = rows.reduce((sum, row) => sum + Number(row.shipped_qty || 0), 0);
+    return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>기간별 주문 및 출하 내역서</title>
+      <style>@page{size:A4 landscape;margin:10mm}body{font-family:Malgun Gothic,sans-serif;color:#111}h1{text-align:center;margin:0 0 8px}p{margin:4px 0 12px}.summary{display:flex;gap:12px;margin-bottom:12px}.summary div{border:1px solid #bbb;padding:8px 12px;border-radius:8px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:5px;font-size:12px}th{background:#eee}.num{text-align:right}button{position:fixed;right:20px;top:20px;padding:10px 16px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700}@media print{button{display:none}}</style>
+      </head><body><button onclick="window.print()">인쇄</button><h1>기간별 주문 및 출하 내역서</h1><p>기간: ${escapeHtml(report.date_from || '')} ~ ${escapeHtml(report.date_to || '')}</p><div class="summary"><div>주문수량 ${money(totalOrderQty)}</div><div>출고수량 ${money(totalShippedQty)}</div><div>주문금액 ${money(totalAmount)}원</div></div><table><thead><tr><th>일자</th><th>주문번호</th><th>거래처</th><th>납품처/지역</th><th>발송</th><th>상태</th><th>주문수량</th><th>출고수량</th><th>미출고</th><th>금액</th><th>택배사</th><th>송장</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${fmtDate(row.order_date)}</td><td>${escapeHtml(row.order_no || '')}</td><td>${escapeHtml(customerDisplayName(row))}</td><td>${escapeHtml(row.site_name || row.region || '')}</td><td>${escapeHtml(row.delivery_type || '')}</td><td>${escapeHtml(row.status || '')}</td><td class="num">${money(row.order_qty)}</td><td class="num">${money(row.shipped_qty)}</td><td class="num">${money(row.remaining_qty)}</td><td class="num">${money(row.total_amount)}</td><td>${escapeHtml(row.carriers || '')}</td><td>${escapeHtml(row.invoice_nos || '')}</td></tr>`).join('')}</tbody></table></body></html>`;
+  }
+
+  async function printPeriodReportV311() {
+    const report = await api(`/final/reports/order-shipments?${orderListQueryV311()}`);
+    const win = window.open('', '_blank', 'width=1200,height=900');
+    if (!win) {
+      showToast('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.', 'error');
+      return;
+    }
+    win.document.open();
+    win.document.write(reportDocumentHtmlV311(report));
+    win.document.close();
+    win.focus();
+  }
+
+  async function deleteOrderV311(orderId, renderAfter) {
+    const check = await api(`/final/orders/${orderId}/delete-check`);
+    const lines = [
+      `주문번호: ${check.order_no}`,
+      `품목 건수: ${money(check.order_items)}건`,
+      `출고 수량: ${money(check.shipped_qty)}`,
+      `출고 건수: ${money(check.shipments)}건`,
+      `미수/원장 건수: ${money(check.receivable_transactions)}건`,
+      `연결 수금 건수: ${money(check.linked_payments)}건`,
+      '',
+      '삭제 시 관련 출고·미수·수금 연결 자료를 정리합니다. 계속할까요?'
+    ];
+    if (!window.confirm(lines.join('\n'))) return;
+    const reason = window.prompt('주문 삭제 사유를 입력하세요.');
+    if (!reason?.trim()) return;
+    await api(`/final/orders/${orderId}`, { method: 'DELETE', body: JSON.stringify({ delete_reason: reason.trim(), confirm_cleanup: true }) });
+    showToast('주문과 관련 자료를 정리하고 삭제했습니다.');
+    await renderAfter();
+  }
+
+  async function renderOrders(el) {
+    if (!el) return;
+    if (!uiState.orderFilters.date_to) uiState.orderFilters.date_to = today();
+    const f = uiState.orderFilters;
+    if (!el.querySelector('[data-mtf-view="orders-v310"]')) {
+      el.innerHTML = `<div class="mtf-root" data-mtf-view="orders-v310"><div class="mtf-head"><div><h1>주문/출고</h1><p>주문·출고자료를 불러오는 중입니다.</p></div></div><div class="mtf-card"><div class="mtf-loading">불러오는 중...</div></div></div>`;
+    }
+    const rows = await fetchOrdersForListV311();
+    el.innerHTML = `
+      <div class="mtf-root" data-mtf-view="orders-v310">
+        <div class="mtf-head">
+          <div><h1>주문/출고</h1><p>조회조건 기준으로 주문, 출고, 미출고와 거래명세서를 관리합니다.</p></div>
+          <div class="mtf-actions">
+            <button type="button" class="mtf-btn help" data-page-help>도움말</button>
+            <button type="button" class="mtf-btn" data-order-period-report>기간별 내역서</button>
+            ${can('orders.write') ? '<button type="button" class="mtf-btn primary" data-order-add>주문 등록</button><button type="button" class="mtf-btn success" data-order-add-ship>주문+즉시출고</button>' : ''}
+          </div>
+        </div>
+        <div class="mtf-card">
+          <div class="mtf-filter-grid" style="grid-template-columns:repeat(6,minmax(130px,1fr));align-items:end">
+            <div class="mtf-field"><label>기간 시작</label><input class="mtf-input" type="date" id="mtf-order-from" value="${escapeHtml(f.date_from || '')}"></div>
+            <div class="mtf-field"><label>기간 종료</label><input class="mtf-input" type="date" id="mtf-order-to" value="${escapeHtml(f.date_to || today())}"></div>
+            <div class="mtf-field"><label>거래처</label><input class="mtf-input" id="mtf-order-customer-q" value="${escapeHtml(f.customer_q || '')}" placeholder="거래처명"></div>
+            <div class="mtf-field"><label>발송구분</label><select class="mtf-select" id="mtf-order-delivery"><option value="">전체</option>${['택배','영업방문','기타'].map((value) => `<option value="${value}" ${f.delivery_type === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div>
+            <div class="mtf-field"><label>상태</label><select class="mtf-select" id="mtf-order-status">${orderStatusOptionsV311(f.status || '')}</select></div>
+            <div class="mtf-field"><label>주문번호/박싱/메모</label><input class="mtf-input" id="mtf-order-q" value="${escapeHtml(f.q || '')}" placeholder="포함 검색"></div>
+          </div>
+          <div class="mtf-actions" style="margin-top:12px"><button type="button" class="mtf-btn primary" data-order-search>조회</button><button type="button" class="mtf-btn" data-order-reset>조건 초기화</button></div>
+          <div class="mtf-summary" style="margin-top:12px"><div class="mtf-stat"><span>조회 주문</span><strong>${money(rows.length)}</strong></div><div class="mtf-stat"><span>주문금액</span><strong>${money(rows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0))}원</strong></div><div class="mtf-stat"><span>미출고 수량</span><strong>${money(rows.reduce((sum, row) => sum + Number(row.remaining_qty || 0), 0))}</strong></div></div>
+        </div>
+        <div class="mtf-card">
+          <div class="mtf-table-wrap">
+            <table class="mtf-table">
+              <thead><tr><th>일자</th><th>주문번호</th><th>거래처/납품장소</th><th>발송구분</th><th>박싱</th><th>상태</th><th>수량</th><th>미출고</th><th>금액</th><th>관리</th></tr></thead>
+              <tbody>${rows.length ? rows.map((row) => `<tr><td>${fmtDate(row.order_date)}</td><td>${escapeHtml(row.order_no || '')}</td><td><strong>${escapeHtml(customerDisplayName(row))}</strong><span class="mtf-sub">${escapeHtml(row.site_name || row.region || '')}</span></td><td>${escapeHtml(row.delivery_type || '')}</td><td>${escapeHtml(row.delivery_group || '')}</td><td>${statusBadge(row.status)}</td><td>${money(row.order_qty || row.item_count || 0)}</td><td>${money(row.remaining_qty || 0)}</td><td>${money(row.total_amount)}원</td><td>${orderActionButtonsV311(row)}</td></tr>`).join('') : '<tr><td colspan="10" class="mtf-empty">조회 결과가 없습니다.</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+
+    const readFilters = () => {
+      uiState.orderFilters = {
+        ...uiState.orderFilters,
+        date_from: el.querySelector('#mtf-order-from')?.value || '',
+        date_to: el.querySelector('#mtf-order-to')?.value || today(),
+        customer_q: el.querySelector('#mtf-order-customer-q')?.value.trim() || '',
+        delivery_type: el.querySelector('#mtf-order-delivery')?.value || '',
+        status: el.querySelector('#mtf-order-status')?.value || '',
+        q: el.querySelector('#mtf-order-q')?.value.trim() || ''
+      };
+    };
+    const rerender = () => renderOrders(el);
+    el.querySelector('[data-order-search]')?.addEventListener('click', async () => {
+      readFilters();
+      await withBusyButton(el.querySelector('[data-order-search]'), '조회 중...', rerender);
+    });
+    bindEnterAction(el, '#mtf-order-from,#mtf-order-to,#mtf-order-customer-q,#mtf-order-delivery,#mtf-order-status,#mtf-order-q', async () => {
+      readFilters();
+      await withBusyButton(el.querySelector('[data-order-search]'), '조회 중...', rerender);
+    });
+    el.querySelector('[data-order-reset]')?.addEventListener('click', async () => {
+      uiState.orderFilters = { q: '', date_from: '', date_to: today(), customer_q: '', customer_id: '', delivery_type: '', status: '' };
+      await renderOrders(el);
+    });
+    el.querySelector('[data-page-help]')?.addEventListener('click', () => openPageHelp('orders'));
+    el.querySelector('[data-order-period-report]')?.addEventListener('click', () => printPeriodReportV311().catch((error) => showToast(error.message, 'error')));
+    el.querySelector('[data-order-add]')?.addEventListener('click', () => typeof window.openOrderModal === 'function' ? window.openOrderModal() : showToast('주문 등록 함수를 찾지 못했습니다.', 'error'));
+    el.querySelector('[data-order-add-ship]')?.addEventListener('click', () => typeof window.openOrderModal === 'function' ? window.openOrderModal() : showToast('주문 등록 후 해당 주문에서 미출고 출고를 실행하세요.', 'error'));
+
+    if (el.dataset.mtfOrderDelegated !== 'v311') {
+      el.dataset.mtfOrderDelegated = 'v311';
+      el.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-order-action]');
+        if (!button || !el.contains(button)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const orderId = button.dataset.orderId;
+        const action = button.dataset.orderAction;
+        button.disabled = true;
+        try {
+          if (action === 'detail') await openOrderDetail(orderId);
+          if (action === 'statement') await printStatementV311(orderId);
+          if (action === 'edit') await openOrderEditModalV311(orderId);
+          if (action === 'ship') await openShipModal(orderId);
+          if (action === 'cancel') {
+            if (!window.confirm('주문을 취소하고 매출 미수금도 반대로 조정할까요?')) return;
+            await api(`/orders/${orderId}/status`, { method: 'PUT', body: JSON.stringify({ status: 'canceled' }) });
+            showToast('주문을 취소했습니다.');
+            await renderOrders(el);
+          }
+          if (action === 'delete') await deleteOrderV311(orderId, () => renderOrders(el));
+        } catch (error) {
+          showToast(error.message, 'error');
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }
+  }
+
   async function renderCurrentPage(force = false) {
     const page = activePage();
     const el = contentElement();
     if (!el || !['customers', 'orders', 'payments'].includes(page)) return;
 
-    const marker = el.querySelector(`[data-mtf-view="${page}-v308"]`);
+    const marker = el.querySelector(`[data-mtf-view="${page}-v310"]`);
     if (marker && !force) return;
 
     try {
@@ -3469,5 +3198,5 @@
   window.addEventListener('load', () => scheduleRender(true));
   scheduleRender(true);
 
-  console.info(`MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V308 ${VERSION} 로드 완료`);
+  console.info(`MT옵틱스 APPLY_FINAL_ENHANCEMENTS_V314_CORE ${VERSION} 로드 완료`);
 })();

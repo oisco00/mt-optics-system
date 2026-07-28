@@ -1490,6 +1490,7 @@ function createFinalEnhancementsRouter() {
           `SELECT so.*, c.name AS customer_name, c.business_no, c.owner_name, c.phone, c.mobile,
                   c.address, c.road_address, c.jibun_address, c.detail_address,
                   cs.site_name, cs.region, cs.phone AS site_phone, cs.business_no AS site_business_no,
+                  cs.address AS site_address, cs.road_address AS site_road_address, cs.jibun_address AS site_jibun_address, cs.detail_address AS site_detail_address,
                   cs.original_customer_name AS site_original_customer_name
              FROM sales_orders so
              JOIN customers c ON c.id = so.customer_id
@@ -1519,7 +1520,7 @@ function createFinalEnhancementsRouter() {
             business_no: order.site_business_no || order.business_no,
             owner_name: order.owner_name,
             phone: formatPhone(order.site_phone || order.phone || order.mobile),
-            address: [order.road_address || order.address || order.jibun_address, order.detail_address].filter(Boolean).join(' ')
+            address: [order.site_road_address || order.site_address || order.site_jibun_address || order.road_address || order.address || order.jibun_address, order.site_detail_address || order.detail_address].filter(Boolean).join(' ')
           },
           items,
           shipments,
