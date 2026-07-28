@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 echo "================================================"
-echo "APPLY_FINAL_ENHANCEMENTS_V322_STABLE"
+echo "APPLY_FINAL_ENHANCEMENTS_V323_STABLE"
 echo "================================================"
 [[ -f frontend/app.js ]] || { echo "ERROR: mt-optics-system 루트에서 실행하세요."; exit 1; }
 [[ -f _patch_files/frontend/final-enhancements-v317.js ]] || { echo "ERROR: _patch_files 폴더가 없습니다."; exit 1; }
@@ -12,7 +12,7 @@ if grep -q "final-enhancements-v318\|final-enhancements-v319" frontend/app.js 2>
   exit 1
 fi
 
-BACKUP_DIR="_backup/mt-optics-v322-stable-$(date +%Y%m%d_%H%M%S)"
+BACKUP_DIR="_backup/mt-optics-v323-stable-$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 cp -f frontend/final-enhancements-v317.js "$BACKUP_DIR/" 2>/dev/null || true
 cp -f frontend/assets/mt_stamp.png "$BACKUP_DIR/" 2>/dev/null || true
@@ -25,5 +25,5 @@ cp -f _patch_files/backend/src/finalEnhancements.js backend/src/finalEnhancement
 node --check backend/src/finalEnhancements.js
 node --check frontend/final-enhancements-v317.js
 
-echo "SUCCESS: V322 stable patch applied."
+echo "SUCCESS: V323 stable patch applied."
 echo "Backup: $BACKUP_DIR"

@@ -42,7 +42,7 @@
     style.id = 'mt-v317-style';
     style.textContent = `
       .mt-v317-num, input.mt-v317-num{text-align:right!important;font-variant-numeric:tabular-nums}.mt-v317-hidden{display:none!important}.page-subtitle,.topbar .muted,header .muted{display:none!important}.money,.num,td.money,td.num{text-align:right!important;font-variant-numeric:tabular-nums}
-      .mt-v317-report-page{padding:28px}.mt-v317-report-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px}.mt-v317-report-head h1{margin:0;font-size:28px}.mt-v317-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.mt-v317-tabs button{border:0;border-radius:999px;padding:10px 16px;font-weight:900;cursor:pointer;background:#e2e8f0}.mt-v317-tabs button.active{background:#2563eb;color:#fff}.mt-v317-card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:18px;box-shadow:0 8px 24px rgba(15,23,42,.04);margin-bottom:14px}.mt-v317-filters{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr)) auto auto auto;gap:12px;align-items:end}.mt-v317-filters label{display:block;font-weight:800;margin-bottom:6px}.mt-v317-filters input,.mt-v317-filters select{width:100%;height:42px;border:1px solid #cbd5e1;border-radius:10px;padding:0 11px}.mt-v317-btn{border:0;border-radius:10px;padding:12px 16px;font-weight:900;cursor:pointer;background:#e2e8f0}.mt-v317-btn.primary{background:#2563eb;color:white}.mt-v317-btn.green{background:#059669;color:white}.mt-v317-paper{background:#fff;border:1px solid #cbd5e1;margin-top:14px;padding:18px;min-height:220px}.mt-v317-paper h2{text-align:center;margin:0 0 5px}.mt-v317-paper .period{text-align:center;color:#475569;margin-bottom:14px}.mt-v317-table{width:100%;border-collapse:collapse;font-size:13px}.mt-v317-table th,.mt-v317-table td{border:1px solid #94a3b8;padding:6px 8px}.mt-v317-table th{background:#f1f5f9;text-align:center;cursor:grab;user-select:none}.mt-v317-table .num{text-align:right}.mt-v317-table tr.subtotal{background:#fff7ed;font-weight:900}.mt-v317-table tr.grand{background:#e0f2fe;font-weight:900}.mt-v317-empty{text-align:center;color:#64748b;padding:38px}.mt-v317-muted{font-size:12px;color:#64748b;margin-top:8px}
+      .mt-v317-product-mini{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:2147483646;display:flex;align-items:center;justify-content:center}.mt-v317-product-mini .box{width:min(860px,92vw);max-height:88vh;overflow:auto;background:#fff;border-radius:18px;padding:22px;box-shadow:0 24px 64px rgba(0,0,0,.3)}.mt-v317-product-mini .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.mt-v317-product-mini .grid{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr));gap:12px}.mt-v317-product-mini label{display:block;font-weight:800;margin-bottom:5px}.mt-v317-product-mini input,.mt-v317-product-mini select{width:100%;height:40px;border:1px solid #cbd5e1;border-radius:10px;padding:0 10px}.mt-v317-order-tools{display:flex;justify-content:flex-end;gap:8px;margin:0 0 10px}.mt-v317-order-tools button{border:0;border-radius:10px;padding:9px 13px;font-weight:900;cursor:pointer;background:#e2e8f0}.mt-v317-report-page{padding:28px}.mt-v317-report-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px}.mt-v317-report-head h1{margin:0;font-size:28px}.mt-v317-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.mt-v317-tabs button{border:0;border-radius:999px;padding:10px 16px;font-weight:900;cursor:pointer;background:#e2e8f0}.mt-v317-tabs button.active{background:#2563eb;color:#fff}.mt-v317-card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:18px;box-shadow:0 8px 24px rgba(15,23,42,.04);margin-bottom:14px}.mt-v317-filters{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr)) auto auto auto;gap:12px;align-items:end}.mt-v317-filters label{display:block;font-weight:800;margin-bottom:6px}.mt-v317-filters input,.mt-v317-filters select{width:100%;height:42px;border:1px solid #cbd5e1;border-radius:10px;padding:0 11px}.mt-v317-btn{border:0;border-radius:10px;padding:12px 16px;font-weight:900;cursor:pointer;background:#e2e8f0}.mt-v317-btn.primary{background:#2563eb;color:white}.mt-v317-btn.green{background:#059669;color:white}.mt-v317-paper{background:#fff;border:1px solid #cbd5e1;margin-top:14px;padding:18px;min-height:220px}.mt-v317-paper h2{text-align:center;margin:0 0 5px}.mt-v317-paper .period{text-align:center;color:#475569;margin-bottom:14px}.mt-v317-table{width:100%;border-collapse:collapse;font-size:13px}.mt-v317-table th,.mt-v317-table td{border:1px solid #94a3b8;padding:6px 8px}.mt-v317-table th{background:#f1f5f9;text-align:center;cursor:grab;user-select:none}.mt-v317-table .num{text-align:right}.mt-v317-table tr.subtotal{background:#fff7ed;font-weight:900}.mt-v317-table tr.grand{background:#e0f2fe;font-weight:900}.mt-v317-empty{text-align:center;color:#64748b;padding:38px}.mt-v317-muted{font-size:12px;color:#64748b;margin-top:8px}
       @media print{.nav,.sidebar,header,.topbar,.mt-v317-no-print,.mt-v317-report-head,.mt-v317-tabs,.mt-v317-filters{display:none!important}.mt-v317-report-page{padding:0}.mt-v317-card{box-shadow:none;border:0}.mt-v317-paper{border:0;margin:0;padding:0}.mt-v317-table th,.mt-v317-table td{font-size:11px;padding:4px}}
     `;
     document.head.appendChild(style);
@@ -220,7 +220,7 @@
     document.getElementById('v317-print')?.addEventListener('click', () => window.print());
     document.getElementById('v317-excel')?.addEventListener('click', exportReportExcel);
     document.getElementById('v317-manager-admin')?.addEventListener('click', openManagerAdmin);
-    document.getElementById('v317-report-close')?.addEventListener('click', () => { document.querySelector('[data-page="dashboard"]')?.click(); });
+    document.getElementById('v317-report-close')?.addEventListener('click', () => { localStorage.setItem('mt_page','dashboard'); location.reload(); });
     await queryReport();
   }
 
@@ -483,7 +483,81 @@ async function openStatement(id) { if(!id) return; try{ const data=await API(`/f
   function patchStatementButtons(root=document){ root.querySelectorAll('.action-cell, td').forEach(cell=>{ if(cell.querySelector('[data-v317-statement]'))return; const src=cell.querySelector('[data-view], [data-edit-order], [data-ship], [data-delete-order]'); const id=src?.dataset.view||src?.dataset.editOrder||src?.dataset.ship||src?.dataset.deleteOrder; if(!id)return; const b=document.createElement('button'); b.type='button'; b.className='small secondary'; b.dataset.v317Statement=id; b.textContent='거래명세서'; cell.append(' ', b); }); }
   document.addEventListener('click', e=>{ const b=e.target.closest?.('[data-v317-statement], [data-order-action="statement"], [data-statement-print], [data-order-statement]'); if(!b)return; e.preventDefault(); e.stopPropagation(); if(e.stopImmediatePropagation)e.stopImmediatePropagation(); openStatement(b.dataset.v317Statement||b.dataset.orderId||b.dataset.id||b.getAttribute('data-order-statement')); }, true);
 
-  function runPatches() { injectStyle(); addReportsMenu(); hideUnnecessarySiteButtons(document); addManagerButtonsToCustomers(document); hideLegacyDeliveryReceivablePanel(document); patchCustomerDeleteButtons(document); patchStatementButtons(document); patchPaymentDetails(document); document.querySelectorAll('input').forEach(formatNumberInput); document.querySelectorAll('form').forEach(ensureManagerField); }
+
+  function addQuickProductButtonToOrderModal(root = document) {
+    const items = root.querySelector?.('#order-items');
+    if (!items || document.querySelector('[data-v317-quick-product]')) return;
+    const holder = document.createElement('div');
+    holder.className = 'mt-v317-order-tools';
+    holder.dataset.v317QuickProduct = '1';
+    holder.innerHTML = '<button type="button" class="secondary" id="v317-quick-product-btn">제품 등록</button>';
+    const parent = items.parentElement || items;
+    parent.insertBefore(holder, parent.firstChild);
+    holder.querySelector('button')?.addEventListener('click', () => openQuickProductModal());
+  }
+
+  function orderTargetRow() {
+    const active = document.activeElement?.closest?.('.item-row');
+    if (active) return active;
+    const rows = Array.from(document.querySelectorAll('#order-items .item-row'));
+    return rows.find(r => !r.querySelector('select[name="product_id"]')?.value) || rows[rows.length - 1] || null;
+  }
+
+  function addProductToOrderForm(product) {
+    if (!product || !product.id) return;
+    const label = [product.sku, product.name, product.current_stock !== undefined ? `재고 ${money(product.current_stock)}` : ''].filter(Boolean).join(' · ');
+    const selects = Array.from(document.querySelectorAll('#order-items select[name="product_id"]'));
+    selects.forEach(sel => {
+      if (!Array.from(sel.options).some(o => String(o.value) === String(product.id))) {
+        const opt = document.createElement('option');
+        opt.value = product.id;
+        opt.textContent = label || product.name || `제품 ${product.id}`;
+        sel.appendChild(opt);
+      }
+    });
+    const row = orderTargetRow();
+    if (!row) return;
+    const sel = row.querySelector('select[name="product_id"]');
+    if (sel) sel.value = String(product.id);
+    const name = row.querySelector('input[name="item_name"]');
+    const spec = row.querySelector('input[name="spec"]');
+    const price = row.querySelector('input[name="unit_price"]');
+    if (name) { name.value = product.name || ''; name.dispatchEvent(new Event('input', {bubbles:true})); }
+    if (spec) { spec.value = product.spec || ''; spec.dispatchEvent(new Event('input', {bubbles:true})); }
+    if (price) { price.value = Math.trunc(num(product.default_price || 0)); price.dispatchEvent(new Event('input', {bubbles:true})); }
+  }
+
+  function openQuickProductModal() {
+    if (document.getElementById('v317-product-mini')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'v317-product-mini';
+    overlay.className = 'mt-v317-product-mini';
+    overlay.innerHTML = `<div class="box"><div class="head"><h2 style="margin:0">제품 등록</h2><button type="button" class="mt-v317-btn" data-close>닫기</button></div><form id="v317-product-mini-form"><div class="grid"><div><label>SKU</label><input name="sku" placeholder="미입력 시 자동"></div><div><label>제품명 *</label><input name="name" required></div><div><label>규격</label><input name="spec"></div><div><label>분류</label><input name="category" placeholder="안경테/선글라스/렌즈/부속품"></div><div><label>제품유형</label><input name="product_type" placeholder="완제품/부품/자재"></div><div><label>브랜드</label><input name="brand"></div><div><label>모델번호</label><input name="model_no"></div><div><label>색상명</label><input name="color_name"></div><div><label>단위</label><input name="unit" value="개"></div><div><label>기본단가</label><input name="default_price" class="mt-v317-num" value="0"></div><div><label>현재재고</label><input name="current_stock" class="mt-v317-num" value="0"></div><div><label>안전재고</label><input name="safety_stock" class="mt-v317-num" value="300"></div><div><label>상태</label><select name="status"><option value="active">사용</option><option value="inactive">중지</option></select></div></div><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px"><button type="button" class="mt-v317-btn" data-close>취소</button><button type="submit" class="mt-v317-btn primary">제품 저장 후 선택</button></div></form></div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => overlay.remove()));
+    overlay.querySelectorAll('input').forEach(formatNumberInput);
+    overlay.querySelector('form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.currentTarget;
+      const data = Object.fromEntries(new FormData(form).entries());
+      for (const k of ['default_price','current_stock','safety_stock']) data[k] = num(data[k]);
+      try {
+        let product = await API('/products', {method:'POST', body:JSON.stringify(data)});
+        if (!product?.id) {
+          const list = await API('/products?q=' + encodeURIComponent(data.name || ''));
+          product = Array.isArray(list) ? (list.find(p => p.name === data.name) || list[0]) : product;
+        }
+        addProductToOrderForm(product);
+        overlay.remove();
+        toast('제품을 등록하고 주문 품목에 반영했습니다.', 'success');
+      } catch (err) {
+        toast(err.message || '제품 등록 오류', 'error');
+      }
+    });
+    setTimeout(() => overlay.querySelector('input[name="name"]')?.focus(), 50);
+  }
+
+  function runPatches() { injectStyle(); addReportsMenu(); hideUnnecessarySiteButtons(document); addManagerButtonsToCustomers(document); hideLegacyDeliveryReceivablePanel(document); patchCustomerDeleteButtons(document); patchStatementButtons(document); patchPaymentDetails(document); addQuickProductButtonToOrderModal(document); document.querySelectorAll('input').forEach(formatNumberInput); document.querySelectorAll('form').forEach(ensureManagerField); }
   const mo = new MutationObserver(() => runPatches());
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { runPatches(); mo.observe(document.body,{childList:true,subtree:true}); });
   else { runPatches(); mo.observe(document.body,{childList:true,subtree:true}); }
