@@ -532,7 +532,7 @@ async function openStatement(id) { if(!id) return; try{ const data=await API(`/f
     const overlay = document.createElement('div');
     overlay.id = 'v317-product-mini';
     overlay.className = 'mt-v317-product-mini';
-    overlay.innerHTML = `<div class="box"><div class="head"><h2 style="margin:0">제품 등록</h2><button type="button" class="mt-v317-btn" data-close>닫기</button></div><form id="v317-product-mini-form"><div class="grid"><div><label>SKU</label><input name="sku" placeholder="미입력 시 자동"></div><div><label>제품명 *</label><input name="name" required></div><div><label>규격</label><input name="spec"></div><div><label>분류</label><input name="category" placeholder="안경테/선글라스/렌즈/부속품"></div><div><label>제품유형</label><input name="product_type" placeholder="완제품/부품/자재"></div><div><label>브랜드</label><input name="brand"></div><div><label>모델번호</label><input name="model_no"></div><div><label>색상명</label><input name="color_name"></div><div><label>단위</label><input name="unit" value="개"></div><div><label>기본단가</label><input name="default_price" class="mt-v317-num" value="0"></div><div><label>현재재고</label><input name="current_stock" class="mt-v317-num" value="0"></div><div><label>안전재고</label><input name="safety_stock" class="mt-v317-num" value="300"></div><div><label>상태</label><select name="status"><option value="active">사용</option><option value="inactive">중지</option></select></div></div><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px"><button type="button" class="mt-v317-btn" data-close>취소</button><button type="submit" class="mt-v317-btn primary">제품 저장 후 선택</button></div></form></div>`;
+    overlay.innerHTML = `<div class="box"><div class="head"><div><h2 style="margin:0">제품 등록</h2><div class="mt-v317-muted">제품/재고의 정식 제품등록 항목과 동일한 기준으로 등록합니다. 등록 후 제품/재고 메뉴에서 수정할 수 있습니다.</div></div><button type="button" class="mt-v317-btn" data-close>닫기</button></div><form id="v317-product-mini-form"><div class="grid"><div><label>SKU</label><input name="sku" placeholder="미입력 시 자동"></div><div><label>제품명 *</label><input name="name" required></div><div><label>규격</label><input name="spec"></div><div><label>분류</label><input name="category" placeholder="안경테/선글라스/렌즈/부속품"></div><div><label>제품유형</label><input name="product_type" placeholder="완제품/부품/자재"></div><div><label>브랜드</label><input name="brand"></div><div><label>모델번호</label><input name="model_no"></div><div><label>색상코드</label><input name="color_code"></div><div><label>색상명</label><input name="color_name"></div><div><label>렌즈폭</label><input name="size_eye" class="mt-v317-num"></div><div><label>브릿지</label><input name="bridge_size" class="mt-v317-num"></div><div><label>다리길이</label><input name="temple_length" class="mt-v317-num"></div><div><label>프레임소재</label><input name="frame_material" placeholder="TR/티타늄/메탈/아세테이트"></div><div><label>렌즈소재</label><input name="lens_material"></div><div><label>성별/대상</label><input name="gender" placeholder="공용/남성/여성/아동"></div><div><label>원산지</label><input name="origin"></div><div><label>바코드</label><input name="barcode"></div><div><label>단위</label><input name="unit" value="개"></div><div><label>기본단가</label><input name="default_price" class="mt-v317-num" value="0"></div><div><label>현재재고</label><input name="current_stock" class="mt-v317-num" value="0"></div><div><label>안전재고</label><input name="safety_stock" class="mt-v317-num" value="300"></div><div><label>생산단위</label><select name="production_lot_size"><option value="300">300</option><option value="500">500</option><option value="1000">1000</option></select></div><div><label>인기도</label><select name="popularity_grade"><option value="A">A 인기</option><option value="B">B 보통</option><option value="C" selected>C 기본</option></select></div><div><label>보관위치</label><input name="location"></div><div><label>상태</label><select name="status"><option value="active">사용</option><option value="inactive">중지</option></select></div></div><div style="margin-top:12px"><label>메모</label><textarea name="memo" style="width:100%;min-height:70px;border:1px solid #cbd5e1;border-radius:10px;padding:10px"></textarea></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:16px"><div class="mt-v317-muted">등록 후 수정은 제품/재고 메뉴의 제품 검색 → 수정에서 가능합니다.</div><div style="display:flex;gap:8px"><button type="button" class="mt-v317-btn" data-close>취소</button><button type="submit" class="mt-v317-btn primary">제품 저장 후 선택</button></div></div></form></div>`;
     document.body.appendChild(overlay);
     overlay.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => overlay.remove()));
     overlay.querySelectorAll('input').forEach(formatNumberInput);
@@ -540,7 +540,7 @@ async function openStatement(id) { if(!id) return; try{ const data=await API(`/f
       e.preventDefault();
       const form = e.currentTarget;
       const data = Object.fromEntries(new FormData(form).entries());
-      for (const k of ['default_price','current_stock','safety_stock']) data[k] = num(data[k]);
+      for (const k of ['default_price','current_stock','safety_stock','size_eye','bridge_size','temple_length','production_lot_size']) data[k] = data[k] === '' ? null : num(data[k]);
       try {
         let product = await API('/products', {method:'POST', body:JSON.stringify(data)});
         if (!product?.id) {
@@ -549,13 +549,14 @@ async function openStatement(id) { if(!id) return; try{ const data=await API(`/f
         }
         addProductToOrderForm(product);
         overlay.remove();
-        toast('제품을 등록하고 주문 품목에 반영했습니다.', 'success');
+        toast('제품을 등록하고 주문 품목에 반영했습니다. 수정은 제품/재고 메뉴에서 가능합니다.', 'success');
       } catch (err) {
         toast(err.message || '제품 등록 오류', 'error');
       }
     });
     setTimeout(() => overlay.querySelector('input[name="name"]')?.focus(), 50);
   }
+
 
   function runPatches() { injectStyle(); addReportsMenu(); hideUnnecessarySiteButtons(document); addManagerButtonsToCustomers(document); hideLegacyDeliveryReceivablePanel(document); patchCustomerDeleteButtons(document); patchStatementButtons(document); patchPaymentDetails(document); addQuickProductButtonToOrderModal(document); document.querySelectorAll('input').forEach(formatNumberInput); document.querySelectorAll('form').forEach(ensureManagerField); }
   const mo = new MutationObserver(() => runPatches());

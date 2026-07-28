@@ -231,9 +231,3 @@ echo "http://43.203.11.28"
 line
 
 rm -f "$0" 2>/dev/null || true
-
-# MT_OPTICS_AUTO_RESTART_V324
-echo "STEP: Restarting PM2 and reloading Nginx"
-pm2 restart mt-optics --update-env || true
-pm2 save || true
-sudo systemctl reload nginx || true

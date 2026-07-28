@@ -2134,7 +2134,7 @@ function createFinalEnhancementsRouter() {
       params.push(like, like, like, like, like);
     }
     const whereSql = where.join(' AND ');
-    const [[summary]] = await pool.execute(
+    const [[summary]] = await pool.query(
       `SELECT COUNT(*) AS total_count, COALESCE(SUM(p.amount),0) AS total_amount
          FROM payments p
          JOIN customers c ON c.id = p.customer_id
@@ -2142,7 +2142,7 @@ function createFinalEnhancementsRouter() {
         WHERE ${whereSql}`,
       params
     );
-    const [rows] = await pool.execute(
+    const [rows] = await pool.query(
       `SELECT p.id, p.payment_no, p.payment_date, p.delivery_type, p.method, p.amount,
               p.approval_no, p.memo,
               c.name AS customer_name,
@@ -2154,8 +2154,8 @@ function createFinalEnhancementsRouter() {
          LEFT JOIN sales_managers sm ON sm.id = c.sales_manager_id
         WHERE ${whereSql}
         ORDER BY p.payment_date DESC, p.id DESC
-        LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+        LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
     send(res, { page, limit, total_count: Number(summary.total_count || 0), total_amount: Number(summary.total_amount || 0), rows });
   }));
@@ -2176,20 +2176,20 @@ function createFinalEnhancementsRouter() {
       params.push(like, like);
     }
     const whereSql = where.join(' AND ');
-    const [[summary]] = await pool.execute(
+    const [[summary]] = await pool.query(
       `SELECT COUNT(*) AS total_count, COALESCE(SUM(receivable_balance),0) AS total_receivable
          FROM v_customer_receivable_by_delivery_type
         WHERE ${whereSql}`,
       params
     );
-    const [rows] = await pool.execute(
+    const [rows] = await pool.query(
       `SELECT customer_id, customer_name, customer_site_id, site_name, delivery_type,
               sales_amount, payment_amount, receivable_balance
          FROM v_customer_receivable_by_delivery_type
         WHERE ${whereSql}
         ORDER BY customer_name, site_name, FIELD(delivery_type, '택배', '영업방문', '기타'), delivery_type
-        LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+        LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
     send(res, { page, limit, total_count: Number(summary.total_count || 0), total_receivable: Number(summary.total_receivable || 0), rows });
   }));
