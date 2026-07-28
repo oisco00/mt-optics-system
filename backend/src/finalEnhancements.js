@@ -96,6 +96,10 @@ function createFinalEnhancementsRouter() {
     return clean(candidates.find(Boolean)) || '거래처명 미등록';
   }
 
+  function isClosedBusinessName(row = {}) {
+    return /폐업\s*$/.test(displayName(row));
+  }
+
   function decorateCustomer(row = {}) {
     const name = displayName(row);
     return {
@@ -1671,6 +1675,108 @@ function createFinalEnhancementsRouter() {
     })
   );
 
+
+
+  async function customerSiteDeleteSummary(conn, siteId) {
+    const [siteRows] = await conn.execute(
+      `SELECT cs.*, c.name AS customer_name, c.business_no AS customer_business_no
+         FROM customer_sites cs
+         JOIN customers c ON c.id = cs.customer_id
+        WHERE cs.id = ?`,
+      [siteId]
+    );
+    const site = siteRows[0];
+    if (!site || site.status === 'deleted') throw httpError(404, '거래처/납품장소를 찾을 수 없습니다.');
+
+    const [[orderStats]] = await conn.execute(
+      `SELECT COUNT(*) AS orders
+         FROM sales_orders
+        WHERE customer_site_id = ?
+          AND deleted_at IS NULL`,
+      [siteId]
+    );
+    const [[shipmentStats]] = await conn.execute(
+      `SELECT COUNT(*) AS shipments
+         FROM shipments
+        WHERE customer_site_id = ?`,
+      [siteId]
+    );
+    const [[paymentStats]] = await conn.execute(
+      `SELECT COUNT(*) AS payments
+         FROM payments
+        WHERE customer_site_id = ?
+          AND deleted_at IS NULL`,
+      [siteId]
+    );
+    const [[receivableStats]] = await conn.execute(
+      'SELECT COUNT(*) AS receivable_transactions FROM receivable_transactions WHERE customer_site_id = ?',
+      [siteId]
+    );
+
+    const orders = Number(orderStats.orders || 0);
+    const shipments = Number(shipmentStats.shipments || 0);
+    const payments = Number(paymentStats.payments || 0);
+    const receivables = Number(receivableStats.receivable_transactions || 0);
+    const closedBusiness = isClosedBusinessName({
+      display_name: site.original_customer_name,
+      name: site.original_customer_name,
+      site_name: site.site_name,
+      customer_name: site.customer_name
+    });
+    return {
+      customer_site_id: siteId,
+      customer_id: site.customer_id,
+      customer_name: displayName({ name: site.original_customer_name, site_name: site.site_name, customer_name: site.customer_name }),
+      orders,
+      shipments,
+      payments,
+      receivable_transactions: receivables,
+      closed_business: closedBusiness,
+      can_delete: closedBusiness || (orders === 0 && shipments === 0 && payments === 0 && receivables === 0)
+    };
+  }
+
+  router.get(
+    '/customer-sites/:id/delete-check',
+    requirePermission('customers.write'),
+    asyncRoute(async (req, res) => {
+      const pool = await getPool();
+      const conn = await pool.getConnection();
+      try {
+        send(res, await customerSiteDeleteSummary(conn, toInt(req.params.id, 0)));
+      } finally {
+        conn.release();
+      }
+    })
+  );
+
+  router.delete(
+    '/customer-sites/:id',
+    requirePermission('customers.write'),
+    asyncRoute(async (req, res) => {
+      const siteId = toInt(req.params.id, 0);
+      const reason = clean(req.body?.delete_reason);
+      if (!reason) throw httpError(400, '삭제 사유를 입력하세요.');
+      const deleted = await withTransaction(async (conn) => {
+        const summary = await customerSiteDeleteSummary(conn, siteId);
+        if (!summary.can_delete) {
+          throw httpError(409, "주문·출고·수금·원장 자료가 남아 있어 삭제할 수 없습니다. 단, 거래처명 끝에 '폐업'이 있는 자료는 삭제할 수 있습니다.", summary);
+        }
+        const before = await getRecord(conn, 'customer_sites', siteId);
+        await conn.execute(
+          `UPDATE customer_sites
+              SET status = 'deleted', updated_by = ?, memo = CONCAT(COALESCE(memo, ''), CASE WHEN COALESCE(memo, '') = '' THEN '' ELSE '\n' END, ?)
+            WHERE id = ?`,
+          [req.user.id, `삭제처리: ${reason}`, siteId]
+        );
+        const after = await getRecord(conn, 'customer_sites', siteId);
+        await auditLog(conn, 'customer_sites', siteId, 'DELETE', { ...before, summary }, after, req, reason);
+        return { customer_site: after, summary };
+      });
+      send(res, deleted);
+    })
+  );
+
   async function customerDeleteSummary(conn, customerId) {
     const [customerRows] = await conn.execute('SELECT * FROM customers WHERE id = ?', [customerId]);
     const customer = customerRows[0];
@@ -1714,6 +1820,7 @@ function createFinalEnhancementsRouter() {
     const shipments = Number(shipmentStats.shipments || 0);
     const payments = Number(paymentStats.payments || 0);
     const receivables = Number(receivableStats.receivable_transactions || 0);
+    const closedBusiness = isClosedBusinessName(customer);
     return {
       customer_id: customerId,
       customer_name: displayName(customer),
@@ -1722,7 +1829,8 @@ function createFinalEnhancementsRouter() {
       shipments,
       payments,
       receivable_transactions: receivables,
-      can_delete: orders === 0 && shipments === 0 && payments === 0 && receivables === 0
+      closed_business: closedBusiness,
+      can_delete: closedBusiness || (orders === 0 && shipments === 0 && payments === 0 && receivables === 0)
     };
   }
 
