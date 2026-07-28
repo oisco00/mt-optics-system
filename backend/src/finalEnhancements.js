@@ -382,6 +382,148 @@ function createFinalEnhancementsRouter() {
     })
   );
 
+
+  router.get(
+    '/customer-branches',
+    requirePermission('customers.read'),
+    asyncRoute(async (req, res) => {
+      const pool = await getPool();
+      await ensureCustomerSearchIndexes(pool);
+
+      const q = clean(req.query.q) || '';
+      const limit = Math.min(Math.max(toInt(req.query.limit, 20), 10), 100);
+      const offset = Math.max(toInt(req.query.offset, 0), 0);
+      const like = `%${q}%`;
+
+      // Business rule: one delivery place can be an independent business even
+      // when it was imported under the same customer name. Therefore this query
+      // lists customer_sites as the primary customer rows. Customers without
+      // any site remain visible as one basic row.
+      const branchSql = `
+        SELECT
+          CONCAT('S-', cs.id) AS branch_key,
+          'site' AS record_type,
+          c.id AS id,
+          c.id AS customer_id,
+          cs.id AS customer_site_id,
+          COALESCE(NULLIF(cs.original_customer_name, ''), NULLIF(cs.site_name, ''), c.name) AS name,
+          COALESCE(NULLIF(cs.original_customer_name, ''), NULLIF(cs.site_name, ''), c.name) AS display_name,
+          c.name AS parent_customer_name,
+          c.code AS code,
+          cs.site_code AS site_code,
+          COALESCE(NULLIF(cs.business_no, ''), c.business_no) AS business_no,
+          COALESCE(NULLIF(cs.owner_name, ''), c.owner_name) AS owner_name,
+          COALESCE(NULLIF(cs.phone, ''), NULLIF(c.phone, ''), c.mobile) AS phone,
+          COALESCE(NULLIF(cs.mobile, ''), c.mobile) AS mobile,
+          COALESCE(NULLIF(cs.region, ''), c.region) AS region,
+          cs.site_name AS site_name,
+          cs.original_customer_name AS original_customer_name,
+          cs.default_delivery_type AS default_delivery_type,
+          cs.default_delivery_group AS default_delivery_group,
+          COALESCE(NULLIF(cs.address, ''), NULLIF(cs.road_address, ''), NULLIF(cs.jibun_address, ''), NULLIF(c.address, ''), NULLIF(c.road_address, ''), NULLIF(c.jibun_address, '')) AS address,
+          COALESCE(NULLIF(cs.road_address, ''), NULLIF(c.road_address, '')) AS road_address,
+          COALESCE(NULLIF(cs.jibun_address, ''), NULLIF(c.jibun_address, '')) AS jibun_address,
+          COALESCE(NULLIF(cs.detail_address, ''), NULLIF(c.detail_address, '')) AS detail_address,
+          COALESCE(NULLIF(cs.postal_code, ''), NULLIF(c.postal_code, '')) AS postal_code,
+          COALESCE(NULLIF(cs.address_type, ''), NULLIF(c.address_type, '')) AS address_type,
+          COALESCE(vs.receivable_balance, cs.opening_receivable, 0) AS receivable_balance,
+          cs.opening_receivable AS opening_receivable,
+          COALESCE((SELECT SUM(vb.receivable_balance) FROM v_customer_receivable_by_delivery_type vb WHERE vb.customer_site_id = cs.id AND vb.delivery_type = '택배'), 0) AS parcel_receivable,
+          COALESCE((SELECT SUM(vb.receivable_balance) FROM v_customer_receivable_by_delivery_type vb WHERE vb.customer_site_id = cs.id AND vb.delivery_type = '영업방문'), 0) AS visit_receivable,
+          COALESCE((SELECT SUM(vb.receivable_balance) FROM v_customer_receivable_by_delivery_type vb WHERE vb.customer_site_id = cs.id AND vb.delivery_type = '기타'), 0) AS other_receivable,
+          1 AS site_count,
+          cs.status AS status,
+          cs.memo AS memo,
+          cs.updated_at AS updated_at
+        FROM customer_sites cs
+        JOIN customers c ON c.id = cs.customer_id
+        LEFT JOIN v_customer_site_receivable_balance vs ON vs.customer_site_id = cs.id
+        WHERE cs.status <> 'deleted' AND c.status <> 'deleted'
+
+        UNION ALL
+
+        SELECT
+          CONCAT('C-', c.id) AS branch_key,
+          'customer' AS record_type,
+          c.id AS id,
+          c.id AS customer_id,
+          NULL AS customer_site_id,
+          c.name AS name,
+          c.name AS display_name,
+          NULL AS parent_customer_name,
+          c.code AS code,
+          NULL AS site_code,
+          c.business_no AS business_no,
+          c.owner_name AS owner_name,
+          COALESCE(NULLIF(c.phone, ''), c.mobile) AS phone,
+          c.mobile AS mobile,
+          c.region AS region,
+          '본점/기본' AS site_name,
+          NULL AS original_customer_name,
+          '택배' AS default_delivery_type,
+          '기타' AS default_delivery_group,
+          COALESCE(NULLIF(c.address, ''), NULLIF(c.road_address, ''), NULLIF(c.jibun_address, '')) AS address,
+          c.road_address AS road_address,
+          c.jibun_address AS jibun_address,
+          c.detail_address AS detail_address,
+          c.postal_code AS postal_code,
+          c.address_type AS address_type,
+          COALESCE(vc.receivable_balance, c.opening_receivable, 0) AS receivable_balance,
+          c.opening_receivable AS opening_receivable,
+          COALESCE((SELECT SUM(vb.receivable_balance) FROM v_customer_receivable_by_delivery_type vb WHERE vb.customer_id = c.id AND vb.customer_site_id IS NULL AND vb.delivery_type = '택배'), 0) AS parcel_receivable,
+          COALESCE((SELECT SUM(vb.receivable_balance) FROM v_customer_receivable_by_delivery_type vb WHERE vb.customer_id = c.id AND vb.customer_site_id IS NULL AND vb.delivery_type = '영업방문'), 0) AS visit_receivable,
+          COALESCE((SELECT SUM(vb.receivable_balance) FROM v_customer_receivable_by_delivery_type vb WHERE vb.customer_id = c.id AND vb.customer_site_id IS NULL AND vb.delivery_type = '기타'), 0) AS other_receivable,
+          0 AS site_count,
+          c.status AS status,
+          c.memo AS memo,
+          c.updated_at AS updated_at
+        FROM customers c
+        LEFT JOIN v_customer_receivable_balance vc ON vc.customer_id = c.id
+        WHERE c.status <> 'deleted'
+          AND NOT EXISTS (
+            SELECT 1
+              FROM customer_sites csx
+             WHERE csx.customer_id = c.id
+               AND csx.status <> 'deleted'
+          )
+      `;
+
+      const whereParts = ['1 = 1'];
+      const params = [];
+      if (q) {
+        whereParts.push(`(
+          b.display_name LIKE ? OR b.parent_customer_name LIKE ? OR b.code LIKE ? OR b.site_code LIKE ?
+          OR b.region LIKE ? OR b.phone LIKE ? OR b.mobile LIKE ? OR b.business_no LIKE ?
+          OR b.address LIKE ? OR b.road_address LIKE ? OR b.jibun_address LIKE ?
+        )`);
+        for (let i = 0; i < 11; i += 1) params.push(like);
+      }
+      const where = whereParts.join(' AND ');
+      const [countRows] = await pool.execute(
+        `SELECT COUNT(*) AS total FROM (${branchSql}) b WHERE ${where}`,
+        params
+      );
+      const total = Number(countRows[0]?.total || 0);
+      const [rows] = await pool.execute(
+        `SELECT *
+           FROM (${branchSql}) b
+          WHERE ${where}
+          ORDER BY b.display_name ASC, b.site_name ASC, b.branch_key ASC
+          LIMIT ${limit} OFFSET ${offset}`,
+        params
+      );
+
+      send(res, {
+        rows: rows.map(decorateCustomer),
+        total,
+        limit,
+        offset,
+        page: Math.floor(offset / limit) + 1,
+        page_count: Math.max(Math.ceil(total / limit), 1)
+      });
+    })
+  );
+
   router.get(
     '/customers/search',
     requirePermission('customers.read'),
