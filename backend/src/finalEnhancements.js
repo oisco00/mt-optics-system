@@ -310,6 +310,78 @@ function createFinalEnhancementsRouter() {
     })
   );
 
+
+  async function ensureCarrierGroup(conn) {
+    await conn.execute(
+      `INSERT INTO code_groups(group_code, group_name, description, sort_order, is_active)
+       VALUES ('carrier', '택배사', '출고 처리 시 선택하는 택배사 목록', 90, 1)
+       ON DUPLICATE KEY UPDATE group_name = VALUES(group_name), is_active = 1`
+    );
+    const [[group]] = await conn.execute("SELECT id FROM code_groups WHERE group_code = 'carrier' LIMIT 1");
+    const defaults = ['우체국', '한진택배', '기타'];
+    for (let i = 0; i < defaults.length; i += 1) {
+      const name = defaults[i];
+      await conn.execute(
+        `INSERT INTO code_items(group_id, item_code, item_name, item_value, sort_order, is_active)
+         VALUES (?, ?, ?, ?, ?, 1)
+         ON DUPLICATE KEY UPDATE item_name = VALUES(item_name), item_value = VALUES(item_value), is_active = 1`,
+        [group.id, name, name, name, (i + 1) * 10]
+      );
+    }
+    return group.id;
+  }
+
+  router.get(
+    '/carriers',
+    requirePermission('orders.read'),
+    asyncRoute(async (req, res) => {
+      const pool = await getPool();
+      const conn = await pool.getConnection();
+      try {
+        const groupId = await ensureCarrierGroup(conn);
+        const [rows] = await conn.execute(
+          `SELECT ci.id, ci.item_code, ci.item_name, ci.item_value, ci.sort_order, ci.is_active
+             FROM code_items ci
+            WHERE ci.group_id = ?
+              AND ci.is_active = 1
+            ORDER BY ci.sort_order, ci.item_name`,
+          [groupId]
+        );
+        send(res, rows);
+      } finally {
+        conn.release();
+      }
+    })
+  );
+
+  router.post(
+    '/carriers',
+    requirePermission('masters.write'),
+    asyncRoute(async (req, res) => {
+      const name = clean(req.body?.name || req.body?.item_name || req.body?.item_value);
+      if (!name) throw httpError(400, '택배사명을 입력하세요.');
+      const result = await withTransaction(async (conn) => {
+        const groupId = await ensureCarrierGroup(conn);
+        const [[maxRow]] = await conn.execute('SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM code_items WHERE group_id = ?', [groupId]);
+        await conn.execute(
+          `INSERT INTO code_items(group_id, item_code, item_name, item_value, sort_order, is_active)
+           VALUES (?, ?, ?, ?, ?, 1)
+           ON DUPLICATE KEY UPDATE item_name = VALUES(item_name), item_value = VALUES(item_value), is_active = 1`,
+          [groupId, name, name, name, Number(maxRow.max_order || 0) + 10]
+        );
+        const [[row]] = await conn.execute(
+          `SELECT ci.id, ci.item_code, ci.item_name, ci.item_value, ci.sort_order, ci.is_active
+             FROM code_items ci
+            WHERE ci.group_id = ? AND ci.item_code = ?
+            LIMIT 1`,
+          [groupId, name]
+        );
+        return row;
+      });
+      send(res, result, 201);
+    })
+  );
+
   router.get(
     '/customers/search',
     requirePermission('customers.read'),
@@ -1257,6 +1329,119 @@ function createFinalEnhancementsRouter() {
         Number(inventoryStats.inventory_transactions || 0) > 0
     };
   }
+
+
+
+  router.get(
+    '/orders/:id/statement',
+    requirePermission('orders.read'),
+    asyncRoute(async (req, res) => {
+      const pool = await getPool();
+      const conn = await pool.getConnection();
+      try {
+        const orderId = toInt(req.params.id, 0);
+        const [orders] = await conn.execute(
+          `SELECT so.*, c.name AS customer_name, c.business_no, c.owner_name, c.phone, c.mobile,
+                  c.address, c.road_address, c.jibun_address, c.detail_address,
+                  cs.site_name, cs.region, cs.phone AS site_phone, cs.business_no AS site_business_no,
+                  cs.original_customer_name AS site_original_customer_name
+             FROM sales_orders so
+             JOIN customers c ON c.id = so.customer_id
+             LEFT JOIN customer_sites cs ON cs.id = so.customer_site_id
+            WHERE so.id = ?
+              AND so.deleted_at IS NULL`,
+          [orderId]
+        );
+        const order = orders[0];
+        if (!order) throw httpError(404, '주문을 찾을 수 없습니다.');
+        const [items] = await conn.execute(
+          `SELECT * FROM order_items WHERE order_id = ? ORDER BY id`,
+          [orderId]
+        );
+        const [shipments] = await conn.execute(
+          `SELECT * FROM shipments WHERE order_id = ? ORDER BY shipped_at DESC, id DESC`,
+          [orderId]
+        );
+        const currentBalance = await receivableBalance(conn, order.customer_id);
+        const todaySale = Number(order.total_amount || 0);
+        const previousBalance = currentBalance - todaySale;
+        send(res, {
+          order,
+          customer: {
+            id: order.customer_id,
+            name: displayName({ name: order.customer_name, original_customer_name: order.site_original_customer_name, site_name: order.site_name }),
+            business_no: order.site_business_no || order.business_no,
+            owner_name: order.owner_name,
+            phone: formatPhone(order.site_phone || order.phone || order.mobile),
+            address: [order.road_address || order.address || order.jibun_address, order.detail_address].filter(Boolean).join(' ')
+          },
+          items,
+          shipments,
+          today_sale_amount: todaySale,
+          previous_balance: previousBalance,
+          total_balance: currentBalance
+        });
+      } finally {
+        conn.release();
+      }
+    })
+  );
+
+  router.get(
+    '/reports/order-shipments',
+    requirePermission('orders.read'),
+    asyncRoute(async (req, res) => {
+      const pool = await getPool();
+      const params = [];
+      const conditions = ['so.deleted_at IS NULL'];
+      const q = clean(req.query.q);
+      const customerQ = clean(req.query.customer_q);
+      const customerId = toInt(req.query.customer_id, 0);
+      const dateFrom = clean(req.query.date_from);
+      const dateTo = clean(req.query.date_to);
+      const deliveryType = clean(req.query.delivery_type);
+      const status = clean(req.query.status);
+
+      if (q) {
+        const like = `%${q}%`;
+        conditions.push('(so.order_no LIKE ? OR c.name LIKE ? OR cs.site_name LIKE ? OR so.delivery_group LIKE ? OR so.memo LIKE ?)');
+        params.push(like, like, like, like, like);
+      }
+      if (customerId) { conditions.push('so.customer_id = ?'); params.push(customerId); }
+      else if (customerQ) { conditions.push('c.name LIKE ?'); params.push(`%${customerQ}%`); }
+      if (dateFrom) { conditions.push('so.order_date >= ?'); params.push(dateFrom); }
+      if (dateTo) { conditions.push('so.order_date <= ?'); params.push(dateTo); }
+      if (deliveryType) { conditions.push('so.delivery_type = ?'); params.push(normalizeDeliveryType(deliveryType)); }
+      if (status) { conditions.push('so.status = ?'); params.push(status); }
+
+      const [rows] = await pool.execute(
+        `SELECT so.id, so.order_no, so.order_date, so.status, so.delivery_type, so.delivery_group,
+                so.total_amount, c.name AS customer_name, c.code AS customer_code,
+                cs.site_name, cs.region, cs.original_customer_name AS site_original_customer_name,
+                COALESCE(SUM(oi.quantity), 0) AS order_qty,
+                COALESCE(SUM(oi.shipped_qty), 0) AS shipped_qty,
+                COALESCE(SUM(GREATEST(oi.quantity - COALESCE(oi.shipped_qty,0),0)), 0) AS remaining_qty,
+                GROUP_CONCAT(DISTINCT sh.carrier ORDER BY sh.id SEPARATOR ', ') AS carriers,
+                GROUP_CONCAT(DISTINCT sh.invoice_no ORDER BY sh.id SEPARATOR ', ') AS invoice_nos,
+                MAX(sh.shipped_at) AS last_shipped_at
+           FROM sales_orders so
+           JOIN customers c ON c.id = so.customer_id
+           LEFT JOIN customer_sites cs ON cs.id = so.customer_site_id
+           LEFT JOIN order_items oi ON oi.order_id = so.id
+           LEFT JOIN shipments sh ON sh.order_id = so.id
+          WHERE ${conditions.join(' AND ')}
+          GROUP BY so.id
+          ORDER BY so.order_date ASC, so.id ASC
+          LIMIT 5000`,
+        params
+      );
+      send(res, {
+        date_from: dateFrom || '',
+        date_to: dateTo || todayKst(),
+        rows: rows.map((row) => decorateCustomer({ ...row, name: row.customer_name, original_customer_name: row.site_original_customer_name }))
+      });
+    })
+  );
 
   router.get(
     '/orders/:id/delete-check',
