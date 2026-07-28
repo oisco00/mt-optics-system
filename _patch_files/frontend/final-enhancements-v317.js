@@ -139,6 +139,7 @@
     const isSite = form.querySelector('input[name="site_name"]') && form.querySelector('select[name="customer_id"]');
     const isPayment = form.querySelector('input[name="amount"]') && (form.querySelector('select[name="method"]') || form.querySelector('input[name="approval_no"]'));
     if (!isCustomer && !isSite && !isPayment) return;
+    addManagerButtonToForm(form);
     const list = await salesManagers();
     const existingId = form.querySelector('input[name="sales_manager_id"]')?.value || form.querySelector('select[name="sales_manager_id"]')?.value || '';
     const existingName = form.querySelector('input[name="sales_manager_name"]')?.value || '';
@@ -157,6 +158,36 @@
       if ((btn.textContent || '').trim() === '납품처') btn.classList.add('mt-v317-hidden');
     });
   }
+
+  function addManagerButtonsToCustomers(root = document) {
+    const title = root.querySelector?.('.page-title, h1');
+    if (title && /거래처\/원장/.test(title.textContent || '')) {
+      const toolbarRight = Array.from(root.querySelectorAll('.toolbar .right, .toolbar')).find(x => /거래처 등록|검색/.test(x.textContent || ''));
+      if (toolbarRight && !toolbarRight.querySelector('[data-v317-manager-page]')) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'secondary';
+        btn.dataset.v317ManagerPage = '1';
+        btn.textContent = '영업담당자 관리';
+        btn.addEventListener('click', openManagerAdmin);
+        toolbarRight.prepend(btn, ' ');
+      }
+    }
+  }
+
+  function addManagerButtonToForm(form) {
+    if (!form || form.querySelector('[data-v317-manager-form]')) return;
+    const isCustomer = form.querySelector('input[name="name"]') && form.querySelector('input[name="opening_receivable"]');
+    const isSite = form.querySelector('input[name="site_name"]') && form.querySelector('select[name="customer_id"]');
+    if (!isCustomer && !isSite) return;
+    const wrap = document.createElement('div');
+    wrap.dataset.v317ManagerForm = '1';
+    wrap.style.cssText = 'display:flex;justify-content:flex-end;margin:0 0 10px 0;grid-column:1/-1';
+    wrap.innerHTML = '<button type="button" class="secondary">영업담당자 관리</button>';
+    wrap.querySelector('button').addEventListener('click', openManagerAdmin);
+    form.insertBefore(wrap, form.firstChild);
+  }
+
 
   function addReportsMenu() {
     const nav = document.querySelector('.sidebar nav, .sidebar, aside, #app nav');
@@ -183,19 +214,13 @@
     const app = document.getElementById('app');
     if (!app) return;
     const list = await salesManagers();
-    app.innerHTML = `<main class="mt-v317-report-page"><div class="mt-v317-report-head"><div><h1>출력보고서</h1><p>보고서별 화면 조회 후 인쇄 또는 엑셀 다운로드합니다. 표 머리글은 드래그하여 컬럼 순서를 바꿀 수 있습니다.</p></div><div style="display:flex;gap:8px;align-items:center"><button type="button" class="mt-v317-btn" id="v317-manager-admin">영업담당자 관리</button><button type="button" class="mt-v317-btn" id="v317-report-close">닫기</button></div></div><div class="mt-v317-tabs mt-v317-no-print"><button data-report="sales" class="${type==='sales'?'active':''}">기간별 거래처별 판매현황</button><button data-report="payments" class="${type==='payments'?'active':''}">기간별 거래처별 수금현황</button><button data-report="monthly" class="${type==='monthly'?'active':''}">월별 판매현황</button></div><section class="mt-v317-card mt-v317-no-print"><div class="mt-v317-filters"><div><label>시작일</label><input id="v317-from" type="date" value="${monthStart()}"></div><div><label>종료일</label><input id="v317-to" type="date" value="${today()}"></div><div><label>영업담당자</label><select id="v317-manager"><option value="">전체</option>${list.map(m=>`<option>${esc(m.name)}</option>`).join('')}</select></div><button class="mt-v317-btn primary" id="v317-query">조회</button><button class="mt-v317-btn" id="v317-print">인쇄</button><button class="mt-v317-btn green" id="v317-excel">엑셀</button></div></section><section class="mt-v317-paper" id="v317-result"><div class="mt-v317-empty">보고서를 선택하고 조회하세요.</div></section></main>`;
+    app.innerHTML = `<main class="mt-v317-report-page"><div class="mt-v317-report-head"><div><h1>출력보고서</h1><p>보고서별 화면 조회 후 인쇄 또는 엑셀 다운로드합니다. 표 머리글은 드래그하여 컬럼 순서를 바꿀 수 있습니다.</p></div><div style="display:flex;gap:8px;align-items:center"><button type="button" class="mt-v317-btn" id="v317-report-close">메뉴로 복귀</button><button type="button" class="mt-v317-btn" id="v317-manager-admin">영업담당자 관리</button></div></div><div class="mt-v317-tabs mt-v317-no-print"><button data-report="sales" class="${type==='sales'?'active':''}">기간별 거래처별 판매현황</button><button data-report="payments" class="${type==='payments'?'active':''}">기간별 거래처별 수금현황</button><button data-report="monthly" class="${type==='monthly'?'active':''}">월별 판매현황</button></div><section class="mt-v317-card mt-v317-no-print"><div class="mt-v317-filters"><div><label>시작일</label><input id="v317-from" type="date" value="${monthStart()}"></div><div><label>종료일</label><input id="v317-to" type="date" value="${today()}"></div><div><label>영업담당자</label><select id="v317-manager"><option value="">전체</option>${list.map(m=>`<option>${esc(m.name)}</option>`).join('')}</select></div><button class="mt-v317-btn primary" id="v317-query">조회</button><button class="mt-v317-btn" id="v317-print">인쇄</button><button class="mt-v317-btn green" id="v317-excel">엑셀</button></div></section><section class="mt-v317-paper" id="v317-result"><div class="mt-v317-empty">보고서를 선택하고 조회하세요.</div></section></main>`;
     document.querySelectorAll('[data-report]').forEach(b => b.addEventListener('click', () => renderReports(b.dataset.report)));
     document.getElementById('v317-query')?.addEventListener('click', queryReport);
     document.getElementById('v317-print')?.addEventListener('click', () => window.print());
     document.getElementById('v317-excel')?.addEventListener('click', exportReportExcel);
     document.getElementById('v317-manager-admin')?.addEventListener('click', openManagerAdmin);
-    document.getElementById('v317-report-close')?.addEventListener('click', () => {
-      try {
-        localStorage.setItem('mt_page', 'dashboard');
-        if (window.showPage) return window.showPage('dashboard', true);
-      } catch (_) {}
-      location.reload();
-    });
+    document.getElementById('v317-report-close')?.addEventListener('click', () => { document.querySelector('[data-page="dashboard"]')?.click(); });
     await queryReport();
   }
 
@@ -243,29 +268,38 @@
         columns = [{key:'row_type',label:'구분'},{key:'sales_manager_name',label:'영업담당자'},{key:'customer_name',label:'거래처'},{key:'site_name',label:'구분/지역'},{key:'payment_count',label:'수금건수',num:true},{key:'payment_amount',label:'수금금액',num:true},{key:'methods',label:'수금방법'}];
         rows = withSubtotals((currentReportData.rows||[]).map(r=>({row_type:'내역',...r})), 'sales_manager_name', ['payment_count','payment_amount'], 'row_type');
       } else if (type === 'monthly') {
-        const managers = currentReportData.managers || [];
-        columns = [{key:'product_name',label:'제품명'},{key:'row_type',label:'구분'}];
+        const managers = currentReportData.managers || ['김안구','김동열','이영성','사무실'];
+        columns = [{key:'product_display',label:'제품명'},{key:'metric',label:'구분'}];
         for (const m of managers) columns.push({key:m,label:m,num:true});
-        rows = [];
+        columns.push({key:'total',label:'합계',num:true});
+        const metricDefs = [['판매수량','qty'],['판매금액','sales'],['수금금액','pay'],['미수금','recv']];
         const sourceRows = currentReportData.rows || [];
-        const metricDefs = [
-          ['판매수량', '__qty'],
-          ['판매금액', '__sales'],
-          ['수금금액', '__pay'],
-          ['미수금', '__recv']
-        ];
+        rows = [];
         for (const r of sourceRows) {
-          metricDefs.forEach(([label, suffix], idx) => {
-            const row = { product_name: idx === 0 ? (r.product_name || '') : '', row_type: label };
-            managers.forEach(m => row[m] = num(r[`${m}${suffix}`]));
+          metricDefs.forEach(([label,suffix], idx) => {
+            const row = { product_display: idx === 0 ? (r.product_name || '') : '', metric: label };
+            let total = 0;
+            for (const m of managers) {
+              const val = num(r[`${m}__${suffix}`]);
+              row[m] = val;
+              total += val;
+            }
+            row.total = total;
             rows.push(row);
           });
         }
-        metricDefs.forEach(([label, suffix], idx) => {
-          const row = { product_name: idx === 0 ? '합계' : '', row_type: label, __class:'grand' };
-          managers.forEach(m => row[m] = sourceRows.reduce((sum, r) => sum + num(r[`${m}${suffix}`]), 0));
-          rows.push(row);
+        const grandRows = metricDefs.map(([label,suffix], idx) => {
+          const row = { product_display: idx === 0 ? '합계' : '', metric: label, __class:'grand' };
+          let total = 0;
+          for (const m of managers) {
+            const val = sourceRows.reduce((sum, r) => sum + num(r[`${m}__${suffix}`]), 0);
+            row[m] = val;
+            total += val;
+          }
+          row.total = total;
+          return row;
         });
+        rows.push(...grandRows);
       } else {
         columns = [{key:'row_type',label:'구분'},{key:'sales_manager_name',label:'영업담당자'},{key:'customer_name',label:'거래처'},{key:'site_name',label:'구분/지역'},{key:'order_count',label:'주문건수',num:true},{key:'sales_qty',label:'판매수량',num:true},{key:'sales_amount',label:'판매금액',num:true},{key:'receivable_amount',label:'미수금액',num:true}];
         rows = withSubtotals((currentReportData.rows||[]).map(r=>({row_type:'내역',...r})), 'sales_manager_name', ['order_count','sales_qty','sales_amount','receivable_amount'], 'row_type');
@@ -355,7 +389,8 @@
         const id = edit.dataset.edit;
         const btn = document.createElement('button');
         btn.type = 'button'; btn.className = 'small danger'; btn.dataset.v317CustomerDelete = id; btn.textContent = '삭제';
-        cell.append(' ', btn);
+        edit.insertAdjacentText('afterend', ' ');
+        edit.insertAdjacentElement('afterend', btn);
       }
       const editSite = cell.querySelector('[data-edit-site]');
       if (editSite) {
@@ -373,18 +408,25 @@
     if (s) { e.preventDefault(); e.stopPropagation(); deleteCustomerSiteRecord(s.dataset.v317SiteDelete); }
   }, true);
 
+  function paymentPageFilters() {
+    const from = document.getElementById('v317-detail-from')?.value || monthStart();
+    const to = document.getElementById('v317-detail-to')?.value || today();
+    const deliveryType = document.getElementById('v317-detail-delivery')?.value || '';
+    const q = document.getElementById('v317-detail-q')?.value || '';
+    return { from, to, deliveryType, q };
+  }
   function paymentPageDates() {
-    const dates = Array.from(document.querySelectorAll('input[type="date"]')).map(i => i.value).filter(Boolean);
-    return { from: dates[0] || monthStart(), to: dates[1] || today() };
+    const f = paymentPageFilters();
+    return { from: f.from, to: f.to };
   }
   async function renderPaymentDetailPanel(kind, page=1) {
     const box = document.getElementById(`v317-${kind}-box`);
     if (!box) return;
-    const {from, to} = paymentPageDates();
+    const {from, to, deliveryType, q} = paymentPageFilters();
     const limit = Number(document.getElementById(`v317-${kind}-limit`)?.value || 10);
     box.innerHTML = '<div class="mt-v317-empty">조회 중...</div>';
     try {
-      const data = await API(`/final/${kind === 'payments' ? 'payments-page' : 'receivables-page'}?` + new URLSearchParams({date_from:from,date_to:to,page:String(page),limit:String(limit)}));
+      const data = await API(`/final/${kind === 'payments' ? 'payments-page' : 'receivables-page'}?` + new URLSearchParams({date_from:from,date_to:to,page:String(page),limit:String(limit),delivery_type:deliveryType,q}));
       const rows = data.rows || [];
       if (kind === 'payments') {
         box.innerHTML = `<div class="mt-v317-muted">총 ${money(data.total_count)}건 / 수금합계 ${money(data.total_amount)}원</div>`+
@@ -401,6 +443,15 @@
     for (let p=Math.max(1,page-2); p<=Math.min(totalPages,page+2); p++) pages.push(`<button class="mt-v317-btn ${p===page?'primary':''}" data-v317-page="${p}" data-kind="${kind}">${p}</button>`);
     return `<div class="mt-v317-no-print" style="display:flex;gap:6px;align-items:center;justify-content:flex-end;margin-top:10px"><button class="mt-v317-btn" data-v317-page="${Math.max(1,page-1)}" data-kind="${kind}">이전</button>${pages.join('')}<button class="mt-v317-btn" data-v317-page="${Math.min(totalPages,page+1)}" data-kind="${kind}">다음</button></div>`;
   }
+  function hideLegacyDeliveryReceivablePanel(root = document) {
+    const title = root.querySelector?.('.page-title, h1');
+    if (!title || !/수금\/미수금/.test(title.textContent || '')) return;
+    root.querySelectorAll('.panel, section').forEach(el => {
+      const directHead = Array.from(el.children || []).find(ch => /^(H2|H3)$/i.test(ch.tagName || ''));
+      if (directHead && (directHead.textContent || '').trim() === '발송구분별 미수금') el.classList.add('mt-v317-hidden');
+    });
+  }
+
   function patchPaymentDetails(root=document) {
     const title = root.querySelector?.('.page-title, h1');
     if (!title || !/수금\/미수금/.test(title.textContent || '')) return;
@@ -410,7 +461,7 @@
     const panel = document.createElement('section');
     panel.id = 'v317-payment-details';
     panel.className = 'panel';
-    panel.innerHTML = `<h3>수금내역 및 미수금내역 조회</h3><div class="toolbar mt-v317-no-print" style="margin-bottom:10px"><div class="left"><label>수금내역 표시건수 <select id="v317-payments-limit"><option>10</option><option>20</option><option>50</option></select></label><label style="margin-left:12px">미수금 표시건수 <select id="v317-receivables-limit"><option>10</option><option>20</option><option>50</option></select></label></div><div class="right"><button class="secondary" id="v317-refresh-payment-details">내역 조회</button></div></div><div class="mt-v317-card"><h3>조회구간 수금내역</h3><div id="v317-payments-box"></div></div><div class="mt-v317-card"><h3>조회구간 미수금내역</h3><div id="v317-receivables-box"></div></div>`;
+    panel.innerHTML = `<h3>수금내역 및 미수금내역 조회</h3><div class="mt-v317-card mt-v317-no-print"><h3>조회조건</h3><div class="mt-v317-filters" style="grid-template-columns:repeat(6,minmax(130px,1fr));align-items:end"><div><label>시작일</label><input id="v317-detail-from" type="date" value="${monthStart()}"></div><div><label>종료일</label><input id="v317-detail-to" type="date" value="${today()}"></div><div><label>거래처/구분 검색</label><input id="v317-detail-q" placeholder="거래처명, 납품처, 수금번호"></div><div><label>발송구분</label><select id="v317-detail-delivery"><option value="">전체</option><option>택배</option><option>영업방문</option><option>기타</option></select></div><div><label>수금내역 표시건수</label><select id="v317-payments-limit"><option>10</option><option>20</option><option>50</option></select></div><div><label>미수금 표시건수</label><select id="v317-receivables-limit"><option>10</option><option>20</option><option>50</option></select></div><button class="mt-v317-btn primary" id="v317-refresh-payment-details">내역 조회</button></div><div class="mt-v317-muted">조회조건 기준으로 발송구분별 수금 및 미수금 내역을 확인합니다. 미수금은 현재 미수잔액 기준입니다.</div></div><div class="mt-v317-card"><h3>조회구간 수금내역</h3><div id="v317-payments-box"></div></div><div class="mt-v317-card"><h3>조회조건 미수금내역</h3><div id="v317-receivables-box"></div></div>`;
     formPanel.insertAdjacentElement('afterend', panel);
     panel.addEventListener('click', e => {
       const b = e.target.closest('[data-v317-page]');
@@ -420,9 +471,9 @@
     renderPaymentDetailPanel('payments',1); renderPaymentDetailPanel('receivables',1);
   }
 
-  function stampUrl() { return new URL('/assets/mt_stamp.png?v=317v318', location.origin).href; }
+  function stampUrl() { return new URL('/assets/mt_stamp.png?v=322', location.origin).href; }
   
-function statementCss() { return `@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}html,body{margin:0;background:#fff;color:#111;font-family:'Malgun Gothic',Arial,sans-serif}.toolbar{position:fixed;right:8mm;top:6mm;z-index:99999;display:flex;gap:8px}.toolbar button{border:0;border-radius:8px;padding:9px 15px;font-weight:900;cursor:pointer}.toolbar .print{background:#2563eb;color:#fff}.toolbar .close{background:#e5e7eb}.sheet{width:200mm;height:287mm;margin:0 auto;overflow:hidden}.copy{position:relative;height:138mm;margin:0}.copy-label{position:absolute;right:0;top:0;font-size:11px}.cut{height:5mm;border-top:1px dashed #777;margin:1.2mm 0}.head,.items{width:100%;border-collapse:collapse;table-layout:fixed}.head td,.items td,.items th{border:1px solid #111;vertical-align:middle}.head td{height:6.6mm;padding:.7mm 1.3mm;font-size:10.5px}.items td,.items th{height:6.4mm;padding:.6mm 1.1mm;font-size:10.5px}.title-row{position:relative;height:12mm!important;padding:0!important}.title-wrap{position:relative;height:100%;display:flex;align-items:center;justify-content:center;padding:0 8mm}.title{font-size:22px!important;font-weight:900;text-align:center;letter-spacing:8mm;line-height:1}.no-box{position:absolute;left:3mm;top:50%;transform:translateY(-50%);font-weight:900;letter-spacing:0}.side{writing-mode:vertical-rl;text-align:center;font-weight:800;letter-spacing:2px;background:#f3f4f6}.label{font-weight:800;text-align:center;background:#f8fafc}.center{text-align:center}.right{text-align:right}.claim{text-align:center;font-weight:800;height:5.5mm!important}.items th{background:#e5e7eb;text-align:center}.name{text-align:left;word-break:keep-all}.summary td{height:6.2mm;font-weight:800}.stamp{position:absolute;right:1mm;top:13mm;width:15mm;height:15mm;object-fit:contain;opacity:.95;z-index:4;transform:rotate(0deg)}@media print{html,body{width:210mm;height:297mm}.toolbar{display:none}.sheet{width:200mm;height:287mm}.copy{page-break-inside:avoid}}`; }
+function statementCss() { return `@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}html,body{margin:0;background:#fff;color:#111;font-family:'Malgun Gothic',Arial,sans-serif}.toolbar{position:fixed;right:8mm;top:6mm;z-index:99999;display:flex;gap:8px}.toolbar button{border:0;border-radius:8px;padding:9px 15px;font-weight:900;cursor:pointer}.toolbar .print{background:#2563eb;color:#fff}.toolbar .close{background:#e5e7eb}.sheet{width:200mm;height:287mm;margin:0 auto;overflow:hidden}.copy{position:relative;height:138mm;margin:0}.copy-label{position:absolute;right:0;top:0;font-size:11px}.cut{height:5mm;border-top:1px dashed #777;margin:1.2mm 0}.head,.items{width:100%;border-collapse:collapse;table-layout:fixed}.head td,.items td,.items th{border:1px solid #111;vertical-align:middle}.head td{height:6.6mm;padding:.7mm 1.3mm;font-size:10.5px}.items td,.items th{height:6.4mm;padding:.6mm 1.1mm;font-size:10.5px}.title-row{position:relative;height:12mm!important;padding:0!important}.title-wrap{position:relative;height:100%;display:flex;align-items:center;justify-content:center;padding:0 8mm}.title{font-size:22px!important;font-weight:900;text-align:center;letter-spacing:8mm;line-height:1}.no-box{position:absolute;left:3mm;top:50%;transform:translateY(-50%);font-weight:900;letter-spacing:0}.side{writing-mode:vertical-rl;text-align:center;font-weight:800;letter-spacing:2px;background:#f3f4f6}.label{font-weight:800;text-align:center;background:#f8fafc}.center{text-align:center}.right{text-align:right}.claim{text-align:center;font-weight:800;height:5.5mm!important}.items th{background:#e5e7eb;text-align:center}.name{text-align:left;word-break:keep-all}.summary td{height:6.2mm;font-weight:800}.stamp{position:absolute;right:3mm;top:17mm;width:15mm;height:15mm;object-fit:contain;opacity:.95;z-index:4;transform:rotate(0deg)}@media print{html,body{width:210mm;height:297mm}.toolbar{display:none}.sheet{width:200mm;height:287mm}.copy{page-break-inside:avoid}}`; }
 
   function lineAmount(item) { return num(item.amount) || num(item.quantity) * num(item.unit_price); }
   function statementRows(items, d) { const rows=(items||[]).slice(0,7).map(i=>`<tr><td class="center">${esc(String(d).slice(5,7))}</td><td class="center">${esc(String(d).slice(8,10))}</td><td class="name">${esc(i.item_name||'')}${i.spec?'<br><span style="font-size:9px">'+esc(i.spec)+'</span>':''}</td><td class="right">${money(i.quantity)}</td><td class="right">${money(i.unit_price)}</td><td class="right">${money(lineAmount(i))}</td></tr>`); while(rows.length<7)rows.push('<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>'); return rows.join(''); }
@@ -432,7 +483,7 @@ async function openStatement(id) { if(!id) return; try{ const data=await API(`/f
   function patchStatementButtons(root=document){ root.querySelectorAll('.action-cell, td').forEach(cell=>{ if(cell.querySelector('[data-v317-statement]'))return; const src=cell.querySelector('[data-view], [data-edit-order], [data-ship], [data-delete-order]'); const id=src?.dataset.view||src?.dataset.editOrder||src?.dataset.ship||src?.dataset.deleteOrder; if(!id)return; const b=document.createElement('button'); b.type='button'; b.className='small secondary'; b.dataset.v317Statement=id; b.textContent='거래명세서'; cell.append(' ', b); }); }
   document.addEventListener('click', e=>{ const b=e.target.closest?.('[data-v317-statement], [data-order-action="statement"], [data-statement-print], [data-order-statement]'); if(!b)return; e.preventDefault(); e.stopPropagation(); if(e.stopImmediatePropagation)e.stopImmediatePropagation(); openStatement(b.dataset.v317Statement||b.dataset.orderId||b.dataset.id||b.getAttribute('data-order-statement')); }, true);
 
-  function runPatches() { injectStyle(); addReportsMenu(); hideUnnecessarySiteButtons(document); patchCustomerDeleteButtons(document); patchStatementButtons(document); patchPaymentDetails(document); document.querySelectorAll('input').forEach(formatNumberInput); document.querySelectorAll('form').forEach(ensureManagerField); }
+  function runPatches() { injectStyle(); addReportsMenu(); hideUnnecessarySiteButtons(document); addManagerButtonsToCustomers(document); hideLegacyDeliveryReceivablePanel(document); patchCustomerDeleteButtons(document); patchStatementButtons(document); patchPaymentDetails(document); document.querySelectorAll('input').forEach(formatNumberInput); document.querySelectorAll('form').forEach(ensureManagerField); }
   const mo = new MutationObserver(() => runPatches());
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { runPatches(); mo.observe(document.body,{childList:true,subtree:true}); });
   else { runPatches(); mo.observe(document.body,{childList:true,subtree:true}); }
