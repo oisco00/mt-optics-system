@@ -318,10 +318,10 @@ function normalizeCustomerSitePayload(body) {
   const data = pick(body, [
     'customer_id', 'site_code', 'site_name', 'original_customer_name', 'business_no', 'owner_name', 'phone', 'mobile',
     'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'default_delivery_type', 'default_delivery_group', 'sales_rep_id', 'opening_receivable',
-    'credit_limit', 'status', 'memo'
+    'credit_limit', 'sales_manager_id', 'sales_manager_name', 'sales_manager_bank', 'sales_manager_account', 'status', 'memo'
   ]);
   if (Object.prototype.hasOwnProperty.call(data, 'customer_id')) data.customer_id = toInt(data.customer_id);
-  for (const key of ['site_code', 'site_name', 'original_customer_name', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'default_delivery_group', 'status', 'memo']) {
+  for (const key of ['site_code', 'site_name', 'original_customer_name', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'default_delivery_group', 'sales_manager_name', 'sales_manager_bank', 'sales_manager_account', 'status', 'memo']) {
     if (Object.prototype.hasOwnProperty.call(data, key)) data[key] = clean(data[key]);
   }
   for (const key of ['phone', 'mobile']) {
@@ -329,6 +329,7 @@ function normalizeCustomerSitePayload(body) {
   }
   if (Object.prototype.hasOwnProperty.call(data, 'default_delivery_type')) data.default_delivery_type = normalizeDeliveryType(data.default_delivery_type);
   if (Object.prototype.hasOwnProperty.call(data, 'sales_rep_id')) data.sales_rep_id = data.sales_rep_id ? toInt(data.sales_rep_id) : null;
+  if (Object.prototype.hasOwnProperty.call(data, 'sales_manager_id')) data.sales_manager_id = data.sales_manager_id ? toInt(data.sales_manager_id) : null;
   if (Object.prototype.hasOwnProperty.call(data, 'opening_receivable')) data.opening_receivable = toMoney(data.opening_receivable);
   if (Object.prototype.hasOwnProperty.call(data, 'credit_limit')) data.credit_limit = toMoney(data.credit_limit);
   if (!data.site_name && data.region) data.site_name = data.region;
@@ -338,18 +339,19 @@ function normalizeCustomerSitePayload(body) {
 function normalizeCustomerPayload(body) {
   const data = pick(body, [
     'code', 'name', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region',
-    'sales_rep_id', 'payment_terms', 'opening_receivable', 'credit_limit', 'status', 'memo'
+    'sales_rep_id', 'payment_terms', 'opening_receivable', 'credit_limit', 'sales_manager_id', 'sales_manager_name', 'sales_manager_bank', 'sales_manager_account', 'status', 'memo'
   ]);
   if (Object.prototype.hasOwnProperty.call(data, 'name') && !clean(data.name)) {
     throw badRequest('거래처명은 필수입니다.');
   }
-  for (const key of ['code', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'payment_terms', 'status', 'memo']) {
+  for (const key of ['code', 'business_no', 'owner_name', 'phone', 'mobile', 'address', 'postal_code', 'road_address', 'jibun_address', 'detail_address', 'address_type', 'region', 'sales_manager_name', 'sales_manager_bank', 'sales_manager_account', 'payment_terms', 'status', 'memo']) {
     if (Object.prototype.hasOwnProperty.call(data, key)) data[key] = clean(data[key]);
   }
   for (const key of ['phone', 'mobile']) {
     if (Object.prototype.hasOwnProperty.call(data, key)) data[key] = normalizePhoneValue(data[key]);
   }
   if (Object.prototype.hasOwnProperty.call(data, 'sales_rep_id')) data.sales_rep_id = data.sales_rep_id ? toInt(data.sales_rep_id) : null;
+  if (Object.prototype.hasOwnProperty.call(data, 'sales_manager_id')) data.sales_manager_id = data.sales_manager_id ? toInt(data.sales_manager_id) : null;
   if (Object.prototype.hasOwnProperty.call(data, 'opening_receivable')) data.opening_receivable = toMoney(data.opening_receivable);
   if (Object.prototype.hasOwnProperty.call(data, 'credit_limit')) data.credit_limit = toMoney(data.credit_limit);
   return data;

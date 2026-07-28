@@ -426,6 +426,79 @@ async function ensureV15Schema(targetPool) {
   await targetPool.execute('INSERT IGNORE INTO schema_migrations(version) VALUES (?)', ['2026-07-24-v1.5-security-mobile-address-audit']);
 }
 
+async function ensureV312Schema(targetPool) {
+  // v3.12: business sales managers, bank/account info, statement/report support
+  await targetPool.query(`CREATE TABLE IF NOT EXISTS sales_managers (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(80) NOT NULL UNIQUE,
+    bank_name VARCHAR(80) NULL,
+    account_no VARCHAR(120) NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    memo VARCHAR(255) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_sales_managers_active_sort (is_active, sort_order, name)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  const managerColumns = [
+    ['sales_manager_id', 'BIGINT UNSIGNED NULL'],
+    ['sales_manager_name', 'VARCHAR(80) NULL'],
+    ['sales_manager_bank', 'VARCHAR(80) NULL'],
+    ['sales_manager_account', 'VARCHAR(120) NULL']
+  ];
+  for (const tableName of ['customers', 'customer_sites', 'payments']) {
+    for (const [name, definition] of managerColumns) {
+      await ensureColumn(targetPool, tableName, name, definition);
+    }
+  }
+
+  await ensureIndex(targetPool, 'customers', 'idx_customers_sales_manager', 'CREATE INDEX idx_customers_sales_manager ON customers(sales_manager_id, sales_manager_name)');
+  await ensureIndex(targetPool, 'customer_sites', 'idx_customer_sites_sales_manager_v312', 'CREATE INDEX idx_customer_sites_sales_manager_v312 ON customer_sites(sales_manager_id, sales_manager_name)');
+  await ensureIndex(targetPool, 'payments', 'idx_payments_sales_manager', 'CREATE INDEX idx_payments_sales_manager ON payments(sales_manager_id, sales_manager_name)');
+
+  const defaults = [
+    ['김안구', '', '', 10],
+    ['김동열', '', '', 20],
+    ['이영성', '', '', 30],
+    ['사무실', '', '', 40]
+  ];
+  for (const [name, bank, account, sortOrder] of defaults) {
+    await targetPool.execute(
+      `INSERT INTO sales_managers(name, bank_name, account_no, sort_order, is_active)
+       VALUES (?, ?, ?, ?, 1)
+       ON DUPLICATE KEY UPDATE sort_order = VALUES(sort_order), is_active = 1`,
+      [name, bank, account, sortOrder]
+    );
+  }
+
+  // Fill customer sales manager from old users.sales_rep_id only when empty.
+  await targetPool.query(`UPDATE customers c
+    LEFT JOIN users u ON u.id = c.sales_rep_id
+    SET c.sales_manager_name = COALESCE(c.sales_manager_name, u.full_name)
+    WHERE c.sales_manager_name IS NULL AND c.sales_rep_id IS NOT NULL`);
+
+  // Fill site and payment manager from the related customer if empty.
+  await targetPool.query(`UPDATE customer_sites cs
+    JOIN customers c ON c.id = cs.customer_id
+    SET cs.sales_manager_id = COALESCE(cs.sales_manager_id, c.sales_manager_id),
+        cs.sales_manager_name = COALESCE(cs.sales_manager_name, c.sales_manager_name),
+        cs.sales_manager_bank = COALESCE(cs.sales_manager_bank, c.sales_manager_bank),
+        cs.sales_manager_account = COALESCE(cs.sales_manager_account, c.sales_manager_account)
+    WHERE cs.sales_manager_name IS NULL OR cs.sales_manager_name = ''`);
+
+  await targetPool.query(`UPDATE payments p
+    JOIN customers c ON c.id = p.customer_id
+    SET p.sales_manager_id = COALESCE(p.sales_manager_id, c.sales_manager_id),
+        p.sales_manager_name = COALESCE(p.sales_manager_name, c.sales_manager_name),
+        p.sales_manager_bank = COALESCE(p.sales_manager_bank, c.sales_manager_bank),
+        p.sales_manager_account = COALESCE(p.sales_manager_account, c.sales_manager_account)
+    WHERE p.sales_manager_name IS NULL OR p.sales_manager_name = ''`);
+
+  await targetPool.execute('INSERT IGNORE INTO schema_migrations(version) VALUES (?)', ['2026-07-28-v3.12-sales-managers-reports']);
+}
+
+
 async function initDb() {
   if (pool) return pool;
   if (initPromise) return initPromise;
@@ -440,6 +513,7 @@ async function initDb() {
       await ensureV13Schema(pool);
       await ensureV14Schema(pool);
       await ensureV15Schema(pool);
+      await ensureV312Schema(pool);
     }
     return pool;
   })();

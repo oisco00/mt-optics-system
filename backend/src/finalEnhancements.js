@@ -1981,6 +1981,170 @@ function createFinalEnhancementsRouter() {
     })
   );
 
+
+  async function ensureSalesManagersRuntime(connOrPool) {
+    await connOrPool.query(`CREATE TABLE IF NOT EXISTS sales_managers (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(80) NOT NULL UNIQUE,
+      bank_name VARCHAR(80) NULL,
+      account_no VARCHAR(120) NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      memo VARCHAR(255) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_sales_managers_active_sort (is_active, sort_order, name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    const columns = [
+      ['sales_manager_id', 'BIGINT UNSIGNED NULL'],
+      ['sales_manager_name', 'VARCHAR(80) NULL'],
+      ['sales_manager_bank', 'VARCHAR(80) NULL'],
+      ['sales_manager_account', 'VARCHAR(120) NULL']
+    ];
+    async function columnExists(tableName, columnName) {
+      const [rows] = await connOrPool.execute(`SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`, [tableName, columnName]);
+      return Number(rows[0]?.cnt || 0) > 0;
+    }
+    async function addColumn(tableName, columnName, definition) {
+      if (!(await columnExists(tableName, columnName))) await connOrPool.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+    }
+    for (const tableName of ['customers', 'customer_sites', 'payments']) {
+      for (const [name, definition] of columns) await addColumn(tableName, name, definition);
+    }
+    const defaults = [['김안구', 10], ['김동열', 20], ['이영성', 30], ['사무실', 40]];
+    for (const [name, sortOrder] of defaults) {
+      await connOrPool.execute(`INSERT INTO sales_managers(name, sort_order, is_active) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE sort_order = VALUES(sort_order), is_active = 1`, [name, sortOrder]);
+    }
+  }
+
+  async function resolveSalesManager(conn, body = {}, customerId = 0, siteId = 0) {
+    await ensureSalesManagersRuntime(conn);
+    let manager = null;
+    const managerId = toInt(body.sales_manager_id, 0);
+    if (managerId) {
+      const [rows] = await conn.execute('SELECT * FROM sales_managers WHERE id = ? LIMIT 1', [managerId]);
+      manager = rows[0] || null;
+    }
+    if (!manager && clean(body.sales_manager_name)) {
+      const [rows] = await conn.execute('SELECT * FROM sales_managers WHERE name = ? LIMIT 1', [clean(body.sales_manager_name)]);
+      manager = rows[0] || null;
+    }
+    if (!manager && siteId) {
+      const [rows] = await conn.execute('SELECT sales_manager_id, sales_manager_name, sales_manager_bank, sales_manager_account FROM customer_sites WHERE id = ? LIMIT 1', [siteId]);
+      if (rows[0]?.sales_manager_name) manager = { id: rows[0].sales_manager_id, name: rows[0].sales_manager_name, bank_name: rows[0].sales_manager_bank, account_no: rows[0].sales_manager_account };
+    }
+    if (!manager && customerId) {
+      const [rows] = await conn.execute('SELECT sales_manager_id, sales_manager_name, sales_manager_bank, sales_manager_account FROM customers WHERE id = ? LIMIT 1', [customerId]);
+      if (rows[0]?.sales_manager_name) manager = { id: rows[0].sales_manager_id, name: rows[0].sales_manager_name, bank_name: rows[0].sales_manager_bank, account_no: rows[0].sales_manager_account };
+    }
+    if (!manager) return { id: null, name: null, bank_name: null, account_no: null };
+    return { id: manager.id || null, name: manager.name || manager.sales_manager_name || null, bank_name: manager.bank_name || manager.sales_manager_bank || null, account_no: manager.account_no || manager.sales_manager_account || null };
+  }
+
+  router.get('/sales-managers', requirePermission('customers.read'), asyncRoute(async (req, res) => {
+    const pool = await getPool();
+    await ensureSalesManagersRuntime(pool);
+    const [rows] = await pool.query('SELECT id, name, bank_name, account_no, sort_order, is_active, memo FROM sales_managers ORDER BY is_active DESC, sort_order, name');
+    send(res, rows);
+  }));
+
+  router.post('/sales-managers', requirePermission('masters.write'), asyncRoute(async (req, res) => {
+    const name = clean(req.body?.name);
+    if (!name) throw httpError(400, '영업담당자명을 입력하세요.');
+    const result = await withTransaction(async (conn) => {
+      await ensureSalesManagersRuntime(conn);
+      const id = toInt(req.body?.id, 0);
+      if (id) {
+        await conn.execute('UPDATE sales_managers SET name = ?, bank_name = ?, account_no = ?, sort_order = ?, is_active = ? WHERE id = ?', [name, clean(req.body.bank_name), clean(req.body.account_no), toInt(req.body.sort_order, 0), req.body.is_active === false || req.body.is_active === '0' ? 0 : 1, id]);
+      } else {
+        await conn.execute('INSERT INTO sales_managers(name, bank_name, account_no, sort_order, is_active) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE bank_name = VALUES(bank_name), account_no = VALUES(account_no), sort_order = VALUES(sort_order), is_active = VALUES(is_active)', [name, clean(req.body.bank_name), clean(req.body.account_no), toInt(req.body.sort_order, 0), req.body.is_active === false || req.body.is_active === '0' ? 0 : 1]);
+      }
+      const [rows] = await conn.execute('SELECT * FROM sales_managers WHERE name = ? LIMIT 1', [name]);
+      return rows[0];
+    });
+    send(res, result, 201);
+  }));
+
+  router.get('/customers/:id/sales-manager', requirePermission('customers.read'), asyncRoute(async (req, res) => {
+    const pool = await getPool();
+    await ensureSalesManagersRuntime(pool);
+    const [rows] = await pool.execute(`SELECT c.id, c.name, c.sales_manager_id, c.sales_manager_name, c.sales_manager_bank, c.sales_manager_account,
+             sm.name AS manager_name, sm.bank_name AS manager_bank, sm.account_no AS manager_account
+        FROM customers c LEFT JOIN sales_managers sm ON sm.id = c.sales_manager_id WHERE c.id = ? LIMIT 1`, [toInt(req.params.id, 0)]);
+    const r = rows[0] || {};
+    send(res, { sales_manager_id: r.sales_manager_id || null, sales_manager_name: r.sales_manager_name || r.manager_name || '', sales_manager_bank: r.sales_manager_bank || r.manager_bank || '', sales_manager_account: r.sales_manager_account || r.manager_account || '' });
+  }));
+
+  router.post('/payments-v312', requirePermission('payments.write'), asyncRoute(async (req, res) => {
+    const customerId = toInt(req.body.customer_id, 0);
+    const amount = toNumber(String(req.body.amount || '0').replace(/,/g, ''), 0);
+    if (!customerId) throw httpError(400, '거래처를 선택하세요.');
+    if (amount <= 0) throw httpError(400, '수금액은 0보다 커야 합니다.');
+    const inserted = await withTransaction(async (conn) => {
+      await ensureSalesManagersRuntime(conn);
+      const customerSiteId = req.body.customer_site_id ? toInt(req.body.customer_site_id) : null;
+      const manager = await resolveSalesManager(conn, req.body, customerId, customerSiteId || 0);
+      const deliveryType = normalizeDeliveryType(req.body.delivery_type || '택배');
+      const paymentNo = clean(req.body.payment_no) || generateNo('PAY');
+      const paymentDate = clean(req.body.payment_date) || todayKst();
+      const [result] = await conn.execute(
+        `INSERT INTO payments(payment_no, customer_id, customer_site_id, order_id, delivery_type, payment_date, method, amount, card_company, approval_no,
+                              bank_name, collector_user_id, memo, sales_manager_id, sales_manager_name, sales_manager_bank, sales_manager_account, created_by, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [paymentNo, customerId, customerSiteId, req.body.order_id ? toInt(req.body.order_id) : null, deliveryType, paymentDate, clean(req.body.method) || 'card', amount, clean(req.body.card_company), clean(req.body.approval_no), clean(req.body.bank_name), req.user.id, clean(req.body.memo), manager.id, manager.name, manager.bank_name, manager.account_no, req.user.id, req.user.id]
+      );
+      await conn.execute(`INSERT INTO receivable_transactions(customer_id, customer_site_id, delivery_type, txn_date, txn_type, payment_id, amount, memo, created_by) VALUES (?, ?, ?, ?, 'PAYMENT', ?, ?, ?, ?)`, [customerId, customerSiteId, deliveryType, paymentDate, result.insertId, -amount, `수금 ${paymentNo}`, req.user.id]);
+      const [rows] = await conn.execute('SELECT * FROM payments WHERE id = ?', [result.insertId]);
+      return rows[0];
+    });
+    send(res, inserted, 201);
+  }));
+
+  router.get('/reports/customer-sales', requirePermission('orders.read'), asyncRoute(async (req, res) => {
+    const pool = await getPool();
+    await ensureSalesManagersRuntime(pool);
+    const dateFrom = clean(req.query.date_from) || oneMonthAgoKst();
+    const dateTo = clean(req.query.date_to) || todayKst();
+    const [rows] = await pool.execute(`SELECT c.name AS customer_name, COALESCE(cs.site_name, '') AS site_name, COALESCE(c.sales_manager_name, sm.name, '미지정') AS sales_manager_name,
+             COUNT(DISTINCT so.id) AS order_count, COALESCE(SUM(oi.quantity),0) AS sales_qty, COALESCE(SUM(oi.amount),0) AS sales_amount
+        FROM sales_orders so JOIN customers c ON c.id=so.customer_id LEFT JOIN customer_sites cs ON cs.id=so.customer_site_id LEFT JOIN sales_managers sm ON sm.id=c.sales_manager_id LEFT JOIN order_items oi ON oi.order_id=so.id
+       WHERE so.deleted_at IS NULL AND so.order_date BETWEEN ? AND ? GROUP BY c.id, cs.id, sales_manager_name ORDER BY c.name, cs.site_name`, [dateFrom, dateTo]);
+    send(res, { date_from: dateFrom, date_to: dateTo, rows });
+  }));
+
+  router.get('/reports/customer-payments', requirePermission('payments.read'), asyncRoute(async (req, res) => {
+    const pool = await getPool();
+    await ensureSalesManagersRuntime(pool);
+    const dateFrom = clean(req.query.date_from) || oneMonthAgoKst();
+    const dateTo = clean(req.query.date_to) || todayKst();
+    const manager = clean(req.query.sales_manager_name);
+    const params = [dateFrom, dateTo];
+    let whereManager = '';
+    if (manager) { whereManager = ' AND COALESCE(p.sales_manager_name, c.sales_manager_name, sm.name, \'미지정\') = ?'; params.push(manager); }
+    const [rows] = await pool.execute(`SELECT c.name AS customer_name, COALESCE(cs.site_name, '') AS site_name, COALESCE(p.sales_manager_name, c.sales_manager_name, sm.name, '미지정') AS sales_manager_name,
+             COUNT(*) AS payment_count, COALESCE(SUM(p.amount),0) AS payment_amount, GROUP_CONCAT(DISTINCT p.method ORDER BY p.method SEPARATOR ', ') AS methods
+        FROM payments p JOIN customers c ON c.id=p.customer_id LEFT JOIN customer_sites cs ON cs.id=p.customer_site_id LEFT JOIN sales_managers sm ON sm.id=c.sales_manager_id
+       WHERE p.deleted_at IS NULL AND p.payment_date BETWEEN ? AND ? ${whereManager} GROUP BY c.id, cs.id, sales_manager_name ORDER BY sales_manager_name, c.name, cs.site_name`, params);
+    send(res, { date_from: dateFrom, date_to: dateTo, rows });
+  }));
+
+  router.get('/reports/monthly-sales-matrix', requirePermission('orders.read'), asyncRoute(async (req, res) => {
+    const pool = await getPool();
+    await ensureSalesManagersRuntime(pool);
+    const dateFrom = clean(req.query.date_from) || `${todayKst().slice(0, 7)}-01`;
+    const dateTo = clean(req.query.date_to) || todayKst();
+    const [salesRows] = await pool.execute(`SELECT COALESCE(c.sales_manager_name, sm.name, '미지정') AS sales_manager_name, oi.item_name AS product_name,
+             COALESCE(SUM(oi.quantity),0) AS sales_qty, COALESCE(SUM(oi.amount),0) AS sales_amount
+        FROM sales_orders so JOIN customers c ON c.id=so.customer_id LEFT JOIN sales_managers sm ON sm.id=c.sales_manager_id JOIN order_items oi ON oi.order_id=so.id
+       WHERE so.deleted_at IS NULL AND so.order_date BETWEEN ? AND ? GROUP BY sales_manager_name, oi.item_name ORDER BY oi.item_name, sales_manager_name`, [dateFrom, dateTo]);
+    const [managerTotals] = await pool.execute(`SELECT COALESCE(c.sales_manager_name, sm.name, '미지정') AS sales_manager_name,
+             COALESCE(SUM(p.amount),0) AS payment_amount
+        FROM payments p JOIN customers c ON c.id=p.customer_id LEFT JOIN sales_managers sm ON sm.id=c.sales_manager_id
+       WHERE p.deleted_at IS NULL AND p.payment_date BETWEEN ? AND ? GROUP BY sales_manager_name`, [dateFrom, dateTo]);
+    const [receivableTotals] = await pool.query(`SELECT COALESCE(c.sales_manager_name, sm.name, '미지정') AS sales_manager_name, COALESCE(SUM(rt.amount),0) AS receivable_amount FROM receivable_transactions rt JOIN customers c ON c.id=rt.customer_id LEFT JOIN sales_managers sm ON sm.id=c.sales_manager_id GROUP BY sales_manager_name`);
+    send(res, { date_from: dateFrom, date_to: dateTo, sales: salesRows, payments: managerTotals, receivables: receivableTotals });
+  }));
+
   return router;
 }
 
