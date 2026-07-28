@@ -1,4 +1,4 @@
-MT옵틱스 V320 안정 패치 완성본
+MT옵틱스 V321 안정 패치 완성본
 
 이 ZIP은 이전 안정 상태인 V317 로딩 구조를 그대로 유지하면서,
 요청하신 V317 보완사항과 V318 직인/거래명세서 보완사항만 반영한 완성 패키지입니다.
@@ -15,8 +15,8 @@ MT옵틱스 V320 안정 패치 완성본
 2. frontend/assets/mt_stamp.png
 3. backend/src/finalEnhancements.js
 4. frontend/postcode-kakao-v317.js
-5. APPLY_FINAL_ENHANCEMENTS_V320_STABLE.cmd
-6. APPLY_FINAL_ENHANCEMENTS_V320_STABLE.sh
+5. APPLY_FINAL_ENHANCEMENTS_V321_STABLE.cmd
+6. APPLY_FINAL_ENHANCEMENTS_V321_STABLE.sh
 7. _patch_files 폴더
 
 반영 내용
@@ -36,7 +36,7 @@ MT옵틱스 V320 안정 패치 완성본
 
 적용 방법
 1. 현재 정상 복구된 mt-optics-system 루트 폴더에 압축 해제
-2. APPLY_FINAL_ENHANCEMENTS_V320_STABLE.cmd 실행
+2. APPLY_FINAL_ENHANCEMENTS_V321_STABLE.cmd 실행
 3. SUCCESS 메시지 확인
 4. GitHub Desktop에서 Commit / Push
 5. AWS에서 실행
@@ -50,3 +50,14 @@ MT옵틱스 V320 안정 패치 완성본
 적용 전 확인
 현재 프로젝트가 no24/V317 상태여야 합니다.
 frontend/app.js 안에 final-enhancements-v318 또는 final-enhancements-v319가 있으면 이 패치는 중단됩니다.
+
+
+V321 추가 반영
+1. 거래명세서 직인 크기를 기존 V320 대비 3/4 수준으로 축소
+2. 직인 위치를 위로 약 1.5cm, 우측으로 약 1.5cm 이동
+3. 거래처/원장 첫 페이지 삭제 버튼 복구 보완
+4. 출력보고서에 닫기 버튼 추가
+5. 월별 판매현황을 요청 예시처럼 제품명/구분/영업사원별 집계 구조로 변경
+   - 제품명 | 구분 | 김안구 | 김동열 | 이영성 | 사무실
+   - 구분: 판매수량, 판매금액, 수금금액, 미수금
+   - 마지막에 합계 행 표시

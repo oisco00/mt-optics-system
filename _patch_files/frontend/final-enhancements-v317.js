@@ -183,12 +183,19 @@
     const app = document.getElementById('app');
     if (!app) return;
     const list = await salesManagers();
-    app.innerHTML = `<main class="mt-v317-report-page"><div class="mt-v317-report-head"><div><h1>출력보고서</h1><p>보고서별 화면 조회 후 인쇄 또는 엑셀 다운로드합니다. 표 머리글은 드래그하여 컬럼 순서를 바꿀 수 있습니다.</p></div><button type="button" class="mt-v317-btn" id="v317-manager-admin">영업담당자 관리</button></div><div class="mt-v317-tabs mt-v317-no-print"><button data-report="sales" class="${type==='sales'?'active':''}">기간별 거래처별 판매현황</button><button data-report="payments" class="${type==='payments'?'active':''}">기간별 거래처별 수금현황</button><button data-report="monthly" class="${type==='monthly'?'active':''}">월별 판매현황</button></div><section class="mt-v317-card mt-v317-no-print"><div class="mt-v317-filters"><div><label>시작일</label><input id="v317-from" type="date" value="${monthStart()}"></div><div><label>종료일</label><input id="v317-to" type="date" value="${today()}"></div><div><label>영업담당자</label><select id="v317-manager"><option value="">전체</option>${list.map(m=>`<option>${esc(m.name)}</option>`).join('')}</select></div><button class="mt-v317-btn primary" id="v317-query">조회</button><button class="mt-v317-btn" id="v317-print">인쇄</button><button class="mt-v317-btn green" id="v317-excel">엑셀</button></div></section><section class="mt-v317-paper" id="v317-result"><div class="mt-v317-empty">보고서를 선택하고 조회하세요.</div></section></main>`;
+    app.innerHTML = `<main class="mt-v317-report-page"><div class="mt-v317-report-head"><div><h1>출력보고서</h1><p>보고서별 화면 조회 후 인쇄 또는 엑셀 다운로드합니다. 표 머리글은 드래그하여 컬럼 순서를 바꿀 수 있습니다.</p></div><div style="display:flex;gap:8px;align-items:center"><button type="button" class="mt-v317-btn" id="v317-manager-admin">영업담당자 관리</button><button type="button" class="mt-v317-btn" id="v317-report-close">닫기</button></div></div><div class="mt-v317-tabs mt-v317-no-print"><button data-report="sales" class="${type==='sales'?'active':''}">기간별 거래처별 판매현황</button><button data-report="payments" class="${type==='payments'?'active':''}">기간별 거래처별 수금현황</button><button data-report="monthly" class="${type==='monthly'?'active':''}">월별 판매현황</button></div><section class="mt-v317-card mt-v317-no-print"><div class="mt-v317-filters"><div><label>시작일</label><input id="v317-from" type="date" value="${monthStart()}"></div><div><label>종료일</label><input id="v317-to" type="date" value="${today()}"></div><div><label>영업담당자</label><select id="v317-manager"><option value="">전체</option>${list.map(m=>`<option>${esc(m.name)}</option>`).join('')}</select></div><button class="mt-v317-btn primary" id="v317-query">조회</button><button class="mt-v317-btn" id="v317-print">인쇄</button><button class="mt-v317-btn green" id="v317-excel">엑셀</button></div></section><section class="mt-v317-paper" id="v317-result"><div class="mt-v317-empty">보고서를 선택하고 조회하세요.</div></section></main>`;
     document.querySelectorAll('[data-report]').forEach(b => b.addEventListener('click', () => renderReports(b.dataset.report)));
     document.getElementById('v317-query')?.addEventListener('click', queryReport);
     document.getElementById('v317-print')?.addEventListener('click', () => window.print());
     document.getElementById('v317-excel')?.addEventListener('click', exportReportExcel);
     document.getElementById('v317-manager-admin')?.addEventListener('click', openManagerAdmin);
+    document.getElementById('v317-report-close')?.addEventListener('click', () => {
+      try {
+        localStorage.setItem('mt_page', 'dashboard');
+        if (window.showPage) return window.showPage('dashboard', true);
+      } catch (_) {}
+      location.reload();
+    });
     await queryReport();
   }
 
@@ -237,12 +244,28 @@
         rows = withSubtotals((currentReportData.rows||[]).map(r=>({row_type:'내역',...r})), 'sales_manager_name', ['payment_count','payment_amount'], 'row_type');
       } else if (type === 'monthly') {
         const managers = currentReportData.managers || [];
-        columns = [{key:'row_type',label:'구분'},{key:'product_name',label:'제품명'}];
-        for (const m of managers) {
-          columns.push({key:`${m}__qty`,label:`${m} 판매수량`,num:true},{key:`${m}__sales`,label:`${m} 판매금액`,num:true},{key:`${m}__pay`,label:`${m} 수금금액`,num:true},{key:`${m}__recv`,label:`${m} 미수금액`,num:true});
+        columns = [{key:'product_name',label:'제품명'},{key:'row_type',label:'구분'}];
+        for (const m of managers) columns.push({key:m,label:m,num:true});
+        rows = [];
+        const sourceRows = currentReportData.rows || [];
+        const metricDefs = [
+          ['판매수량', '__qty'],
+          ['판매금액', '__sales'],
+          ['수금금액', '__pay'],
+          ['미수금', '__recv']
+        ];
+        for (const r of sourceRows) {
+          metricDefs.forEach(([label, suffix], idx) => {
+            const row = { product_name: idx === 0 ? (r.product_name || '') : '', row_type: label };
+            managers.forEach(m => row[m] = num(r[`${m}${suffix}`]));
+            rows.push(row);
+          });
         }
-        rows = (currentReportData.rows||[]).map(r=>({row_type:'내역',...r}));
-        const numKeys = columns.filter(c=>c.num).map(c=>c.key); const grand = makeTotals(rows, numKeys); rows.push({row_type:'합계', product_name:'합계', ...grand, __class:'grand'});
+        metricDefs.forEach(([label, suffix], idx) => {
+          const row = { product_name: idx === 0 ? '합계' : '', row_type: label, __class:'grand' };
+          managers.forEach(m => row[m] = sourceRows.reduce((sum, r) => sum + num(r[`${m}${suffix}`]), 0));
+          rows.push(row);
+        });
       } else {
         columns = [{key:'row_type',label:'구분'},{key:'sales_manager_name',label:'영업담당자'},{key:'customer_name',label:'거래처'},{key:'site_name',label:'구분/지역'},{key:'order_count',label:'주문건수',num:true},{key:'sales_qty',label:'판매수량',num:true},{key:'sales_amount',label:'판매금액',num:true},{key:'receivable_amount',label:'미수금액',num:true}];
         rows = withSubtotals((currentReportData.rows||[]).map(r=>({row_type:'내역',...r})), 'sales_manager_name', ['order_count','sales_qty','sales_amount','receivable_amount'], 'row_type');
@@ -328,7 +351,7 @@
     root.querySelectorAll('td, .action-cell').forEach(cell => {
       if (cell.querySelector('[data-v317-customer-delete], [data-v317-site-delete]')) return;
       const edit = cell.querySelector('[data-edit]');
-      if (edit && !cell.querySelector('[data-sites]')) {
+      if (edit) {
         const id = edit.dataset.edit;
         const btn = document.createElement('button');
         btn.type = 'button'; btn.className = 'small danger'; btn.dataset.v317CustomerDelete = id; btn.textContent = '삭제';
@@ -399,7 +422,7 @@
 
   function stampUrl() { return new URL('/assets/mt_stamp.png?v=317v318', location.origin).href; }
   
-function statementCss() { return `@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}html,body{margin:0;background:#fff;color:#111;font-family:'Malgun Gothic',Arial,sans-serif}.toolbar{position:fixed;right:8mm;top:6mm;z-index:99999;display:flex;gap:8px}.toolbar button{border:0;border-radius:8px;padding:9px 15px;font-weight:900;cursor:pointer}.toolbar .print{background:#2563eb;color:#fff}.toolbar .close{background:#e5e7eb}.sheet{width:200mm;height:287mm;margin:0 auto;overflow:hidden}.copy{position:relative;height:138mm;margin:0}.copy-label{position:absolute;right:0;top:0;font-size:11px}.cut{height:5mm;border-top:1px dashed #777;margin:1.2mm 0}.head,.items{width:100%;border-collapse:collapse;table-layout:fixed}.head td,.items td,.items th{border:1px solid #111;vertical-align:middle}.head td{height:6.6mm;padding:.7mm 1.3mm;font-size:10.5px}.items td,.items th{height:6.4mm;padding:.6mm 1.1mm;font-size:10.5px}.title-row{position:relative;height:12mm!important;padding:0!important}.title-wrap{position:relative;height:100%;display:flex;align-items:center;justify-content:center;padding:0 8mm}.title{font-size:22px!important;font-weight:900;text-align:center;letter-spacing:8mm;line-height:1}.no-box{position:absolute;left:3mm;top:50%;transform:translateY(-50%);font-weight:900;letter-spacing:0}.side{writing-mode:vertical-rl;text-align:center;font-weight:800;letter-spacing:2px;background:#f3f4f6}.label{font-weight:800;text-align:center;background:#f8fafc}.center{text-align:center}.right{text-align:right}.claim{text-align:center;font-weight:800;height:5.5mm!important}.items th{background:#e5e7eb;text-align:center}.name{text-align:left;word-break:keep-all}.summary td{height:6.2mm;font-weight:800}.stamp{position:absolute;right:16mm;top:28mm;width:20mm;height:20mm;object-fit:contain;opacity:.95;z-index:4;transform:rotate(0deg)}@media print{html,body{width:210mm;height:297mm}.toolbar{display:none}.sheet{width:200mm;height:287mm}.copy{page-break-inside:avoid}}`; }
+function statementCss() { return `@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}html,body{margin:0;background:#fff;color:#111;font-family:'Malgun Gothic',Arial,sans-serif}.toolbar{position:fixed;right:8mm;top:6mm;z-index:99999;display:flex;gap:8px}.toolbar button{border:0;border-radius:8px;padding:9px 15px;font-weight:900;cursor:pointer}.toolbar .print{background:#2563eb;color:#fff}.toolbar .close{background:#e5e7eb}.sheet{width:200mm;height:287mm;margin:0 auto;overflow:hidden}.copy{position:relative;height:138mm;margin:0}.copy-label{position:absolute;right:0;top:0;font-size:11px}.cut{height:5mm;border-top:1px dashed #777;margin:1.2mm 0}.head,.items{width:100%;border-collapse:collapse;table-layout:fixed}.head td,.items td,.items th{border:1px solid #111;vertical-align:middle}.head td{height:6.6mm;padding:.7mm 1.3mm;font-size:10.5px}.items td,.items th{height:6.4mm;padding:.6mm 1.1mm;font-size:10.5px}.title-row{position:relative;height:12mm!important;padding:0!important}.title-wrap{position:relative;height:100%;display:flex;align-items:center;justify-content:center;padding:0 8mm}.title{font-size:22px!important;font-weight:900;text-align:center;letter-spacing:8mm;line-height:1}.no-box{position:absolute;left:3mm;top:50%;transform:translateY(-50%);font-weight:900;letter-spacing:0}.side{writing-mode:vertical-rl;text-align:center;font-weight:800;letter-spacing:2px;background:#f3f4f6}.label{font-weight:800;text-align:center;background:#f8fafc}.center{text-align:center}.right{text-align:right}.claim{text-align:center;font-weight:800;height:5.5mm!important}.items th{background:#e5e7eb;text-align:center}.name{text-align:left;word-break:keep-all}.summary td{height:6.2mm;font-weight:800}.stamp{position:absolute;right:1mm;top:13mm;width:15mm;height:15mm;object-fit:contain;opacity:.95;z-index:4;transform:rotate(0deg)}@media print{html,body{width:210mm;height:297mm}.toolbar{display:none}.sheet{width:200mm;height:287mm}.copy{page-break-inside:avoid}}`; }
 
   function lineAmount(item) { return num(item.amount) || num(item.quantity) * num(item.unit_price); }
   function statementRows(items, d) { const rows=(items||[]).slice(0,7).map(i=>`<tr><td class="center">${esc(String(d).slice(5,7))}</td><td class="center">${esc(String(d).slice(8,10))}</td><td class="name">${esc(i.item_name||'')}${i.spec?'<br><span style="font-size:9px">'+esc(i.spec)+'</span>':''}</td><td class="right">${money(i.quantity)}</td><td class="right">${money(i.unit_price)}</td><td class="right">${money(lineAmount(i))}</td></tr>`); while(rows.length<7)rows.push('<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>'); return rows.join(''); }

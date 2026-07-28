@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 echo ================================================
-echo APPLY_FINAL_ENHANCEMENTS_V320_STABLE
+echo APPLY_FINAL_ENHANCEMENTS_V321_STABLE
 echo ================================================
 if not exist "frontend\app.js" (
   echo ERROR: mt-optics-system 루트 폴더에서 실행해야 합니다.
@@ -16,7 +16,7 @@ if not exist "_patch_files\frontend\final-enhancements-v317.js" (
   exit /b 1
 )
 
-set BACKUP_DIR=_backup\mt-optics-v320-stable-%date:~0,4%%date:~5,2%%date:~8,2%_%time:~0,2%%time:~3,2%%time:~6,2%
+set BACKUP_DIR=_backup\mt-optics-v321-stable-%date:~0,4%%date:~5,2%%date:~8,2%_%time:~0,2%%time:~3,2%%time:~6,2%
 set BACKUP_DIR=%BACKUP_DIR: =0%
 mkdir "%BACKUP_DIR%" >nul 2>nul
 
@@ -47,7 +47,7 @@ if not errorlevel 1 (
 )
 
 echo.
-echo SUCCESS: V320 stable patch applied.
+echo SUCCESS: V321 stable patch applied.
 echo Backup: %BACKUP_DIR%
 echo.
 echo Next steps:
